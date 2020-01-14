@@ -50,14 +50,14 @@ class LightspeedRetail:
                 logging.debug(f"Found codes.json with refresh_token : {codes['refresh_token']}")
         except FileNotFoundError as err:
 
-            # MORE TEST AND FIX, DON'T THINK THIS IS WORKING YET
+            # MORE TEST AND FIX HERE, THIS ISNT WORKING YET
             logging.warning("No Codes File Found:{0}".format(err))
             # 2. If there are no keys, it should fire the process to get a temp token, authenticate the user, and write out the creds
             # For now we are going to do it manually by going to
             # https://cloud.lightspeedapp.com/oauth/authorize.php?response_type=code&client_id={YOUR CLIENT ID}&scope=employee:all
             # to obtain the CODE. Paste that CODE (it is in the URL returned) below and run this before the CODE expires (30 seconds)
             # to get your access token back.
-            CODE = "64bd3d41d855150b5dce92d1c4e48d8d36ec8a25" 
+            CODE = "XXXXX" 
             # This is the payload defined by the Lightspeed API doc. My code differs from the sample code, but I think their samples have
             # issues, so mostly I don't use them. 
             payload = {
@@ -127,8 +127,8 @@ def main():
   
 
     # temp_token is the Temp token copied and pasted from the return of this link, need to come back to this
-    # URL use to authenticate user: https://cloud.lightspeedapp.com/oauth/authorize.php?response_type=code&client_id=577f37979925d3afa87ae7c870c34c126b856f8e6297acddb7a753a6fe005e74&scope=employee:all
-    temp_token = '6c3ed4eb5944f6d1b126061ce5dcf45eb2513758'
+    # URL use to authenticate user: https://cloud.lightspeedapp.com/oauth/authorize.php?response_type=code&client_id=XXXX&scope=employee:all
+    temp_token = 'XXXXXX'
 
     # Store Data is passed to the LightspeedRetail() class as a dictionary. Right now, it only has account_id, but we may
     # need more in the future
