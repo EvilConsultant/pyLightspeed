@@ -1,2 +1,0 @@
-# Paths to the Module
-You probably haven't installed this as a module, you probably just downloaded the code and want to run it. You need to make sure the module is in the right path. Can you see the folder where you copied the code if you run this?
