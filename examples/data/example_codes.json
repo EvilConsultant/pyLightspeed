@@ -1,0 +1,7 @@
+{
+    "access_token": "123...",
+    "expires_in": 1800,
+    "token_type": "bearer",
+    "scope": "employee:all systemuserid:123456",
+    "refresh_token": "123..."
+}
