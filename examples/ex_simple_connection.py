@@ -1,40 +1,35 @@
-from retail import connection
-import logging
-import os
-import requests
+# used to handle the keys file
 import json
-import pandas
 
-# Start logging
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
-logging.debug('Start of program')
+# Depending on where you downloaded this, the module is probably not being found by python. This adds the parent directory to the path so the import works.
+import sys
+sys.path.append('../')
+print(sys.path)
 
-# It is recommended that tokens are held as environment variables, not stored in code. Here, Lightspeed key and secret is stored
-# as environment variables and retrieved. See https://slack.dev/python-slackclient/auth.html for some additional info on 
-# manageing OAuth in Python. Account_ID is the ID of your store. For testing, you could always paste in your info.
-client_id = os.environ["LIGHTSPEED_CLIENT_ID"]
-client_secret = os.environ["LIGHTSPEED_CLIENT_SECRET"]
-account_id = os.environ["LIGHTSPEED_ACCOUNT_ID"]
+#imports the api code. If this fails, you probably have your path wrong.
+from pyLightspeed.lsretail import api
 
-# Store Data is passed to the connection() class as a dictionary. Right now, it only has account_id and a local path to store
-# refresh keys
+
+# Get the keys file
+KEY_FILE = "D:\Development\.keys\lightspeed_keys.json"
+
+with open(KEY_FILE) as f:
+    keys = json.load(f)
+
 store_data = {
-            'account_id': os.environ["LIGHTSPEED_ACCOUNT_ID"],
+            'account_id': keys["account_id"],
             'save_path': 'D:\\Development\\.keys\\'
             }
 
 credentials = {
-            'client_id': os.environ["LIGHTSPEED_CLIENT_ID"],
-            'client_secret': os.environ["LIGHTSPEED_CLIENT_SECRET"]
+            'client_id': keys["client_id"],
+            'client_secret': keys["client_secret"]
             }
 
-# Creates the connection to lightspeed, and returns a connection object with useful properties
-lsr = connection(store_data, credentials)
+#Creates a connection
+lsr = api.Connection(store_data, credentials)
 
-#Use it to get something
-url = lsr.api_url+'Item.json'
+#Gets a list of Categories. Pass the name of the API
+categories = lsr.list("Category")
 
-r = requests.get(url, headers=lsr.headers)
-print(r.json())
-df = pandas.read_json(r.json())
-
+print(categories)
