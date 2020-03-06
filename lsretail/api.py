@@ -153,21 +153,37 @@ class Connection:
                     logging.info(f"Bucket is almost full, taking a break.")
                     sleep(10)
                         
-        except requests.exceptions.HTTPError:           
-            logging.error(f"Could not find end point, probably typo: {lightspeed_api.headers}")
-            return
-        except requests.exceptions.Timeout:
-            logging.error(f"Timed Out: {lightspeed_api.headers}")
-            return
-        except requests.exceptions.RequestException as err:
-            if err == '422':
-                logging.warning(f"Exceeded bucket size - waiting: {lightspeed_api.headers}")
-                sleep(10)
-                #This does not work and is totally wrong. It needs to be fixed. But so far I have not exceeded my bucket.
+        # Errors from lightspeed doc at: https://developers.lightspeedhq.com/retail/introduction/errors/
+        except requests.exceptions.HTTPError as err:
+            print(err)    
+            if err.response.status_code == 400:
+                logging.error(f"{err.response.status_code}: Bad Request: Progably a client error (ie. malformed query or invalid XML/JSON payload): {err.response.headers}")
+            elif err.response.status_code == 401:           
+                logging.error(f"{err.response.status_code}: Unauthorized: Auth was required but failed: {err.response.headers}")
+            elif err.response.status_code == 403:           
+                logging.error(f"{err.response.status_code}: Forbidden: Invalid request, server refused: {err.response.headers}")       
+            elif err.response.status_code == 404:           
+                logging.error(f"{err.response.status_code}: Not Found: Probably a type in the endpoint name: {err.response.headers}")
+            elif err.response.status_code == 405:           
+                logging.error(f"{err.response.status_code}: Method Not Allowed: Request method not supported, check that target supports GET/PUT/POST/whatever you did:  {err.response.headers}")
+            elif err.response.status_code == 409:           
+                logging.error(f"{err.response.status_code}: Conflict: Request could not be processed because of conflict:  {err.response.headers}")
+            elif err.response.status_code == 422:           
+                logging.error(f"{err.response.status_code}: Unprocessable Entity: The request was well-formed but was unable to be followed due to semantic errors:  {err.response.headers}")
+            elif err.response.status_code == 429:           
+                logging.error(f"{err.response.status_code}: Too Many Requests: Exceeded the rate limit:  {err.response.headers}")
+            elif err.response.status_code == 500:           
+                logging.error(f"{err.response.status_code}: Internal Error: Unexpected condition and the server freaked:  {err.response.headers}")
+            elif err.response.status_code == 502:           
+                logging.error(f"{err.response.status_code}: Bad Gateway: Invalid response from upstream server:  {err.response.headers}")
+            elif err.response.status_code == 503:           
+                logging.error(f"{err.response.status_code}: Service Unavailable: server overload or down for maintenance:  {err.response.headers}")  
             else:
-                logging.error(f"Something went wrong: {err} on headers: {lightspeed_api.headers}")
-                return
-        
+                logging.error(f"{err.response.status_code}: Unhandled Exception: don't know what to do:  {err.response.headers}")
+        finally:
+             return {'status_code': lightspeed_api.status_code, 'headers': lightspeed_api.headers}
+            
+            
         return all_resources #lightspeed_api.json()
 
 
