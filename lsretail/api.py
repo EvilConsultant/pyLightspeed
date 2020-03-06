@@ -113,6 +113,8 @@ class Connection:
         querystring = {'offset':offset, 'limit':limit}
         try:
             lightspeed_api = requests.get(self.api_url + resource + '.json', params=querystring, headers=self.headers)
+            lightspeed_api.raise_for_status()
+
             logging.debug(f"Request Status Code: {lightspeed_api.status_code}")
             # And hold just the json returned in all_data
             all_data = lightspeed_api.json()
@@ -139,30 +141,39 @@ class Connection:
             #Loop through the resources to build the full list
             while total_amount > current_offset:
                 querystring = {'offset':current_offset, 'limit':current_limit}
-                all_data = requests.get(self.api_url + resource + '.json', params=querystring, headers=self.headers).json()
+                lightspeed_api = requests.get(self.api_url + resource + '.json', params=querystring, headers=self.headers)
+                lightspeed_api.raise_for_status()
+                all_data = lightspeed_api.json()
                 all_resources.extend(all_data[resource])
                 current_offset = current_offset + current_limit
 
                 api_bucket_level, api_bucket_size = [(float(x)) for x in lightspeed_api.headers['X-LS-API-Bucket-Level'].split('/')]
                 logging.debug(f"Bucket is at {api_bucket_level} with a size of {api_bucket_size} and a current drip rate of {api_drip_rate}")
-        
-        except r.exceptions.HTTPError:           
-            logging.debug(f"Incorrect Authentication: {r.headers}")
+                if api_bucket_size > api_bucket_level + 10:
+                    logging.info(f"Bucket is almost full, taking a break.")
+                    sleep(10)
+                        
+        except requests.exceptions.HTTPError:           
+            logging.error(f"Could not find end point, probably typo: {lightspeed_api.headers}")
+            return
         except requests.exceptions.Timeout:
-            logging.debug(f"Timed Out: {r.headers}")
+            logging.error(f"Timed Out: {lightspeed_api.headers}")
+            return
         except requests.exceptions.RequestException as err:
             if err == '422':
-                logging.debug(f"Exceeded bucket size - waiting: {r.headers}")
+                logging.warning(f"Exceeded bucket size - waiting: {lightspeed_api.headers}")
                 sleep(10)
+                #This does not work and is totally wrong. It needs to be fixed. But so far I have not exceeded my bucket.
             else:
-                logging.debug(f"Something went wrong: {err} on headers: {r.headers}")
+                logging.error(f"Something went wrong: {err} on headers: {lightspeed_api.headers}")
+                return
         
         return all_resources #lightspeed_api.json()
 
 
 
 def main():
-    # Start logging
+    # This is not really needed but is here to help me test and because I am lazy.
     logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
     logging.debug('Start of program')
     
