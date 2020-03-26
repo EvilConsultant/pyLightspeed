@@ -149,7 +149,7 @@ class Connection:
 
                 api_bucket_level, api_bucket_size = [(float(x)) for x in lightspeed_api.headers['X-LS-API-Bucket-Level'].split('/')]
                 logging.debug(f"Bucket is at {api_bucket_level} with a size of {api_bucket_size} and a current drip rate of {api_drip_rate}")
-                if api_bucket_size > api_bucket_level + 10:
+                if api_bucket_size < api_bucket_level + 10:
                     logging.info(f"Bucket is almost full, taking a break.")
                     sleep(10)
                         
@@ -180,8 +180,8 @@ class Connection:
                 logging.error(f"{err.response.status_code}: Service Unavailable: server overload or down for maintenance:  {err.response.headers}")  
             else:
                 logging.error(f"{err.response.status_code}: Unhandled Exception: don't know what to do:  {err.response.headers}")
-        finally:
-             return {'status_code': lightspeed_api.status_code, 'headers': lightspeed_api.headers}
+        # finally:
+        #      return {'status_code': lightspeed_api.status_code, 'headers': lightspeed_api.headers}
             
             
         return all_resources #lightspeed_api.json()
@@ -210,7 +210,7 @@ def main():
 
     # Creates the connection to lightspeed, and returns a connection object with useful properties
     lsr = Connection(store_data, credentials)
-    items = lsr.list("Category")
+    items = lsr.list("Item")
     print(items)
 
 
