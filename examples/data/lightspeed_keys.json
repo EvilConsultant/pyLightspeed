@@ -1,5 +1,9 @@
+
 {
-    "client_id": "123PutYourCodeHere456",
-    "client_secret": "123PutYourCodeHere456",
-    "account_id" : "123PutYourStoreIDHere456"
+    "client_id": "PutYourRetailAPICodeHere",
+    "client_secret": "PutYourRetaiAPICodeHere",
+    "account_id" : "PutYourRetailStoreIDHere",
+    "api_key" : "Put your eCom api key here",
+    "api_secret" : "Put your eCom api secret here"
 }
+
