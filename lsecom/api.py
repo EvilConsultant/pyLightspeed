@@ -5,7 +5,7 @@ import json
 import logging
 from time import sleep
 import time
-
+import pandas as pd
 
 
 class Connection:
@@ -139,8 +139,10 @@ class Connection:
             sleep(5) #Make sure lightspeed has timed out
             self.token_refresh()
 
-    def list(self, resource, filter = "", limit = 250, page = 1, rows = 0):
-               
+    def list(self, resource, filter = "", sublist = "", limit = 250, page = 1, rows = 0):
+
+        if sublist =="": sublist = resource
+
         response = requests.request('GET', self.api_url + resource + '/count.json')
 
         #Get the total Count
@@ -159,7 +161,7 @@ class Connection:
             response = requests.get(url, params=querystring)
             response.raise_for_status()
             all_data = response.json()
-            all_resources.extend(all_data[resource])
+            all_resources.extend(all_data[sublist])
             current_offset = current_offset + limit
             page = page+1
                
@@ -206,6 +208,13 @@ class Connection:
                 logging.error(f"{err.response.status_code}: Unhandled Exception: don't know what to do:  {err.response.headers}")
        
 def main():
+    def write_out(filepath, resource):
+        to_json = open(filepath + '.json', 'w')
+        to_json.write(json.dumps(resource, indent=4))
+        to_json.close()
+        pd.DataFrame(resource).to_csv(filepath +'.csv', index=False, encoding='utf-8-sig')
+        logging.debug(f'Wrote data to {filepath}')
+    
     # This is not really needed but is here to help me test and because I am lazy.
     logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
     logging.debug('Start of program')
@@ -227,28 +236,16 @@ def main():
 
     # Creates the connection to lightspeed, and returns a connection object with useful properties
     lse = Connection(store_data, credentials)
+    
+    orders = lse.list("orders", filter="created_at_min=2020-05-10 00:00:00")
+    order_products = []
+    write_out(lse.save_path + 'ecom_orders', orders)
 
-    customers = lse.list("customers")
-    subscriptions = lse.list("subscriptions")
-    for customer in customers:
-        match = False
-        for subscriber in subscriptions:
-            if subscriber['email'] == customer['email']:
-                if subscriber['firstname'] != customer['firstname']: 
-                    logging.debug(f"Updating name {customer['email']}")
-                    data = {
-                            "subscription": {
-                                "isConfirmed": True,
-                                "email": customer['email'],
-                                "firstname": customer['firstname'],
-                                "lastname": customer['lastname'],
-                                "doNotifyConfirmed": False,
-                                "language": "US"
-                                }
-                            }
-                    
-                    lse.update("subscriptions", subscriber["id"], data)
-
+    for order in orders:
+        resource = lse.list('orders/'+ str(order['id'])+'/products', sublist = 'orderProducts')
+        order_products.extend(resource)
+    
+    write_out(lse.save_path + 'ecom_orders_products', order_products)
    
 
 if __name__ == "__main__":

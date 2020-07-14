@@ -211,7 +211,7 @@ class Connection:
             while total_amount > current_offset:
                 self._manage_rate()
                 querystring = {'offset':current_offset, 'limit':current_limit}
-                self.response = requests.get(url + resource + '.json', params=querystring, headers=self.headers)
+                self.response = requests.get(url, params=querystring, headers=self.headers)
                 self.response.raise_for_status()
                 all_data = self.response.json()
                 all_resources.extend(all_data[resource])
@@ -253,9 +253,9 @@ class Connection:
             
          #TODO: This fails on erro 500. Test more with incorrect filters.   
         if flatten:
-            return flatten_json(all_resources)
+            return self.flatten_json(dict(all_resources))
         else:
-            return dict(all_resources) #self.response.json()
+            return all_resources   #self.response.json()
     
 
     def _run_method(self, method, resource, data=None, query=None):
@@ -383,7 +383,42 @@ class Connection:
                 logging.error(f"{err.response.status_code}: Service Unavailable: server overload or down for maintenance:  {err.response.headers}")  
             else:
                 logging.error(f"{err.response.status_code}: Unhandled Exception: don't know what to do:  {err.response.headers}")
-       
+    
+    def update_image(self, id, data, files):
+        self._manage_rate()
+        try:
+            url = self.api_url + "Image.json"
+            self.response = requests.post(url, files=files, data=data, headers=self.headers)
+            self.response.raise_for_status()
+        except requests.exceptions.HTTPError as err:
+            print(err)    
+            if err.response.status_code == 400:
+                logging.error(f"{err.response.status_code}: Bad Request: Progably a client error (ie. malformed query or invalid XML/JSON payload): {err.response.headers}")
+            elif err.response.status_code == 401:           
+                logging.error(f"{err.response.status_code}: Unauthorized: Auth was required but failed: {err.response.headers}")
+                self.refresh_token
+            elif err.response.status_code == 403:           
+                logging.error(f"{err.response.status_code}: Forbidden: Invalid request, server refused: {err.response.headers}")       
+            elif err.response.status_code == 404:           
+                logging.error(f"{err.response.status_code}: Not Found: Probably a type in the endpoint name: {err.response.headers}")
+            elif err.response.status_code == 405:           
+                logging.error(f"{err.response.status_code}: Method Not Allowed: Request method not supported, check that target supports GET/PUT/POST/whatever you did:  {err.response.headers}")
+            elif err.response.status_code == 409:           
+                logging.error(f"{err.response.status_code}: Conflict: Request could not be processed because of conflict:  {err.response.headers}")
+            elif err.response.status_code == 422:           
+                logging.error(f"{err.response.status_code}: Unprocessable Entity: The request was well-formed but was unable to be followed due to semantic errors:  {err.response.headers}")
+            elif err.response.status_code == 429:           
+                logging.error(f"{err.response.status_code}: Too Many Requests: Exceeded the rate limit:  {err.response.headers}")
+                sleep(10)
+            elif err.response.status_code == 500:           
+                logging.error(f"{err.response.status_code}: Internal Error: Unexpected condition and the server freaked:  {err.response.headers}")
+            elif err.response.status_code == 502:           
+                logging.error(f"{err.response.status_code}: Bad Gateway: Invalid response from upstream server:  {err.response.headers}")
+            elif err.response.status_code == 503:           
+                logging.error(f"{err.response.status_code}: Service Unavailable: server overload or down for maintenance:  {err.response.headers}")  
+            else:
+                logging.error(f"{err.response.status_code}: Unhandled Exception: don't know what to do:  {err.response.headers}")
+
 def main():
     # This is not really needed but is here to help me test and because I am lazy.
     logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -413,13 +448,7 @@ def main():
     # data = {"ean": None}
     # lsr.update("Item",7,data)
 
-    items = lsr.list('Item', filter = 'customSku=~,')
-
-    for item in items:
-        #data = {'Item':{'customSKU': item['systemSku']}}
-        data = {"customSku": item["systemSku"]}
-        lsr.update('Item', item['itemID'], data)
-        logging.debug(f"Updated {item['itemID']} {item['description']}")
+   # resource = lsr.list('Category',filter="load_relations=all", flatten=True)
 
 
 

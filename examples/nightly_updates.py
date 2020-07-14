@@ -33,11 +33,12 @@ credentials = {
 lsr = lsretail.Connection(store_data, credentials)
 
 # Update all Customers in Lightspeed to show communications are OK. 
-customers = lsr.list('Customer', filter = "&load_relations=['Contact']&Contact.noEmail=true")
+customers = lsr.list("Customer", filter = '&load_relations=["Contact"]&Contact.noEmail=true')
 data = {'Contact':{'noEmail': 'false','noPhone':'false','noMail':'false'}}
 
 for customer in customers:
-    lsr.update('Customer', customer['customerID'], data)
+    lsr.update("Customer", customer["customerID"], data)
+    logging.debug(f"Updated {customer['customerID']} {customer['firstName']} {customer['lastName']}")    
     logging.debug(f"Updated {customer['customerID']} {customer['firstName']} {customer['lastName']}")
 
 
@@ -51,7 +52,7 @@ for customer in customers:
     match = False
     # Look at each subscriber and see if they are the customer
     for subscriber in subscriptions:
-        if subscriber['email'] == customer['email']:
+        if subscriber['email'].lower() == customer['email'].lower():
             #if they are, we have a match
             match = True
     # If there isn't a match, we need to subscribe them
@@ -79,3 +80,5 @@ for item in items:
     data = {'customSku': item['systemSku']}
     lsr.update('Item', item['itemID'], data)
     logging.debug(f"Updated {item['itemID']} {item['description']}")
+
+
