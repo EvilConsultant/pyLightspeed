@@ -1,11 +1,10 @@
 # pyLightspeed
 Trying to make working with the Lightspeed API more polite. (pyLight? anyone? no? I thought it was good.)
 
-Right now this is in progress and focused on the POS side. eCom side will come soon.
+Right now this is in progress and focused on the POS side. eCom side will come soon. This is super under construction. I am not maintaining good git habits yet, this is just me working. Use at your own risk.
 
-##What Works
-You can use this to make calls to the api with some code tweaks at this point.
-1. You will need to manuall get the Access token, and then paste it in and run this code (in less than 30 second, the token expires). I will be adding some code to call a flask instance to do this within the code, but since this only really needs to be done once, it hasn't been top priority. The code
-2. Once you have the access token pasted in, you will use the refresh tokens. See code comments.
+## Usage
 
-This is super under construction. I am not maintaining good git habits yet, this is just me working. Use at your own risk.
+1. Create lightspeed_keys json files with your keys. I know this isn't best practice - you should store them in environment variables - but for my purposes and to make it easier for people who aren't as familier, I am holding them in a json file. See the example\data directory for an example
+2. You will need to request your authorization token manually and paste it in the code, then run the code (before the 30 second time out). Refer to Lightspeed's doc on [Requesting a temporary token](https://developers.lightspeedhq.com/retail/authentication/authentication-overview/#requesting-an-access-token) for their overview, and refer to comments in api.py and replace `CODE = "XXXXX"` with your temporary token.
+3. Look at examples\ex_simple_connection.py or export_to_csv.ipynb. The rest of the stuff in examples is mostly me playing around trying to figure things out.
