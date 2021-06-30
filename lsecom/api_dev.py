@@ -12,12 +12,13 @@ class Connection:
     r"""LS Ecomm Base Class
 
     """
-    def __init__(self, store_data, credentials, codes_file):
+    def __init__(self, store_datafile):
                 
         # Because refresh tokens don't expire quickly, we save them locally so we can grab them again later.
-        self.codes_file = codes_file
         
-        logging.info(f"LSECOM_API: Creating new Lightspeed Connection with {codes_file} (Store: {store_data['account_id']})")
+        self.load_store(store_datafile)
+        
+        logging.info(f"LSECOM_API: Creating new Lightspeed Connection with {store_datafile} (Store: {self.account_id})")
         
         # A reminder on how Lightspeed tokens work:
         # Temporary token (CODE) - A temp token generated when a user authenticates to lightspeed. It is returned in the URL as code= and called code when passed to the lightspeed api
@@ -28,16 +29,6 @@ class Connection:
         # So you first have a user authenticate with their username and password which gives you CODE, you use CODE to get a new refresh_token and access_token, and you use
         # the refresh_token to periodically get new/refresh the access_token, and you use the access_token to actually get things from the API. Whew.
 
-        self.account_id = store_data['account_id']
-        self.codes_path = store_data['codes_path']
-        self.api_key = credentials['api_key']
-        self.api_secret = credentials['api_secret']
-        self.client_id = credentials['client_id']
-        self.client_secret = credentials['client_secret']
-        
-        # For vintage the language was en, but gaspars it is us
-        self.api_url = f"https://{credentials['api_key']}:{credentials['api_secret']}@{credentials['api_url']}"
-        #self.api_url = f"https://{credentials['api_key']}:{credentials['api_secret']}@api.shoplightspeed.com/us/"
         #self.access_token_url = "https://cloud.lightspeedapp.com/oauth/access_token.php"
         #self.access_token = ''  
         #self.expires_in = ''
@@ -49,7 +40,25 @@ class Connection:
         #self.token_refresh()
         self._session = requests.Session()
     
-    
+    def load_store(self,store_datafile):
+        """Uses a json config file to set key variables to manage connection and output paths"""
+
+        with open(store_datafile) as f:
+            store_data = json.load(f)
+        
+        self.account_id = store_data['account_id']
+        self.codes_path = store_data['codes_path']
+        self.client_id = store_data['client_id']
+        self.client_secret = store_data['client_secret']
+        self.api_key = store_data['api_key'],
+        self.api_secret = store_data['api_secret'],
+
+        self.api_url = f"https://{store_data['api_key']}:{store_data['api_secret']}@{store_data['api_url']}"
+        self.codes_file = store_data['codes_file']
+        self.export_path = store_data['export_path']
+        self.database = store_data["database"]
+            
+        return
     
     def token_refresh(self):
         # On initiation, the object checks to see if there are codes (access_token and refresh_token) saved locally. If it finds them, it reads them, assigns them to 

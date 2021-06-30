@@ -23,18 +23,20 @@ except ImportError:
 class Connection:
     r"""Base class to setup connections and access other objects
 
-    :param store_data: Dictionary with account_id
-    :param credentials: Dictionary with client_id, client_secret, and code
+    :param store_file: Path to JSON file containing parameters
     :return: :class:`connection <connection>` object
 
     """
-    def __init__(self, store_data, credentials, codes_file):
+    #def __init__(self, store_data, credentials, codes_file):
+    #Lets only take a config file, and process everything based on that
+    def __init__(self, store_datafile):
                 
         # Because refresh tokens don't expire quickly, we save them locally so we can grab them again later.
        #pulling this out to make it work with multiple clients and support Gaspars
-        self.codes_file = codes_file
         
-        logging.info(f"LSRETAIL_API: Creating new Lightspeed Connection with {codes_file} (Store: {store_data['account_id']})")
+        self.load_store(store_datafile)
+        
+        logging.info(f"LSRETAIL_API: Creating new Lightspeed Connection with {store_datafile} (Store: {self.account_id})")
         
         # A reminder on how Lightspeed tokens work:
         # Temporary token (CODE) - A temp token generated when a user authenticates to lightspeed. It is returned in the URL as code= and called code when passed to the lightspeed api
@@ -45,11 +47,7 @@ class Connection:
         # So you first have a user authenticate with their username and password which gives you CODE, you use CODE to get a new refresh_token and access_token, and you use
         # the refresh_token to periodically get new/refresh the access_token, and you use the access_token to actually get things from the API. Whew.
 
-        self.account_id = store_data['account_id']
-        self.codes_path = store_data['codes_path']
-        self.client_id = credentials['client_id']
-        self.client_secret = credentials['client_secret']
-        self.api_url = f"https://api.lightspeedapp.com/API/Account/{store_data['account_id']}/"
+
         self.access_token_url = "https://cloud.lightspeedapp.com/oauth/access_token.php"
         self.access_token = ''  
         self.expires_in = ''
@@ -60,7 +58,27 @@ class Connection:
         
         self.token_refresh()
         self._session = requests.Session()
+    
+    def load_store(self,store_datafile):
+        """Uses a json config file to set key variables to manage connection and output paths"""
 
+        with open(store_datafile) as f:
+            store_data = json.load(f)
+        
+        self.account_id = store_data['account_id']
+        self.codes_path = store_data['codes_path']
+        self.client_id = store_data['client_id']
+        self.client_secret = store_data['client_secret']
+        self.api_key = store_data['api_key'],
+        self.api_secret = store_data['api_secret'],
+
+        self.api_url = f"https://api.lightspeedapp.com/API/Account/{store_data['account_id']}/"
+        self.codes_file = store_data['codes_file']
+        self.export_path = store_data['export_path']
+        self.database = store_data["database"]
+            
+        return
+    
     @staticmethod
     def flatten_json(y):
         out = {}
@@ -85,7 +103,7 @@ class Connection:
         # 1. Check to see if there is a credentials.json already
         logging.info(f"LSRETAIL_API: Hold while the token is refreshed...")
         try:
-            with open(f"{self.codes_path}{self.codes_file}",'r') as f:
+            with open(self.codes_file,'r') as f:
                 codes = json.load(f)
                 # Your refresh token does not expire, so it is actually the important one.
                 logging.debug(f"LSRETAIL_API: REFRESH TOKEN: Found codes.json with refresh_token : {codes['refresh_token']}")
@@ -113,7 +131,7 @@ class Connection:
             logging.debug("REFRESH TOKEN: Got new codes, which are: %s" % (codes)) 
 
             # Save the codes in a file on the local system so we can get them (and refresh them) next time  
-            with open(f"{self.codes_path}{self.codes_file}", 'w') as outfile:  
+            with open(self.codes_file, 'w') as outfile:  
                 json.dump(r.json(), outfile, indent=4)
         else:
             # If there are codes, get the refresh token out, and force a refresh the access code            
@@ -130,7 +148,7 @@ class Connection:
             self.token_type = codes['token_type']
             self.scope = codes['scope']
             self.expires_in = codes['expires_in']
-            self.expires = time.time() + self.expires_in
+            self.expires = time.time() + int(self.expires_in)
             logging.debug(f"REFRESH TOKEN: Token refreshed, expires in {self.expires_in} seconds")
             #logging.debug("Writing out new refreshed codes which are now: %s" % (codes))
             # The data returned in a refresh doesn't include the refresh_token, and we need to update the codes.json file, so rebuild it and write it out to the file
@@ -140,9 +158,10 @@ class Connection:
                     "expires_in": codes['expires_in'],
                     "token_type": codes['token_type'],
                     "scope": codes['scope'],
-                    "refresh_token": self.refresh_token
+                    "refresh_token": self.refresh_token,
+                    "last_run": time.time()
                     }
-            with open(f"{self.codes_path}{self.codes_file}", 'w') as outfile:  
+            with open(self.codes_file, 'w') as outfile:  
                 json.dump(new_codes, outfile, indent=4)
 
             
@@ -209,7 +228,7 @@ class Connection:
             current_limit = int(all_data['@attributes']['limit'])
             
             #Loop through the resources to build the full list
-            while total_amount > current_offset:
+            while total_amount >= current_offset:
                 self._manage_rate()
                 querystring = {'offset':current_offset, 'limit':current_limit}
                 self.response = requests.get(url, params=querystring, headers=self.headers)
@@ -232,7 +251,7 @@ class Connection:
             elif err.response.status_code == 403:           
                 logging.error(f"{err.response.status_code}: Forbidden: Invalid request, server refused: {err.response.headers}")       
             elif err.response.status_code == 404:           
-                logging.error(f"{err.response.status_code}: Not Found: Probably a type in the endpoint name: {err.response.headers}")
+                logging.error(f"{err.response.status_code}: Not Found: Probably a typo in the endpoint name: {err.response.headers}")
             elif err.response.status_code == 405:           
                 logging.error(f"{err.response.status_code}: Method Not Allowed: Request method not supported, check that target supports GET/PUT/POST/whatever you did:  {err.response.headers}")
             elif err.response.status_code == 409:           

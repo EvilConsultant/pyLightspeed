@@ -14,6 +14,7 @@ logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %
 logging.debug('Start of program')
 
 KEY_FILE = "D:\Development\.keys\lightspeed_keys.json"
+CODES_FILE = "vintage_codes.json"
 
 with open(KEY_FILE) as f:
     keys = json.load(f)
@@ -30,7 +31,7 @@ credentials = {
             'api_secret': keys["api_secret"]
             }
 
-lsr = lsretail.Connection(store_data, credentials)
+lsr = lsretail.Connection(store_data, credentials, codes_file = CODES_FILE)
 
 # Update all Customers in Lightspeed to show communications are OK. 
 customers = lsr.list("Customer", filter = '&load_relations=["Contact"]&Contact.noEmail=true')

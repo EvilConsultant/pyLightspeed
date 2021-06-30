@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:g="http://base.google.com/ns/1.0">
+    <channel>
+        <title>{{ shop.title | cdata }}</title>
+        <link>{{ shop.domain }}</link>
+        <description>{{ shop.description | cdata }}</description>
+        {% for product in products %}
+            <item>
+                <g:id>{{ product.id }}</g:id>
+                <title>{{ product.fulltitle | cdata }}</title>
+                <description>{{ product.description | cdata }}</description>
+                {% if product.google_category %}
+                    <g:google_product_category>{{ product.google_category | cdata }}</g:google_product_category>
+                {% endif %}
+                <link>{{ (product.url ~ '?source=googlebase') | url }}</link>
+                <g:image_link>{{ product.image | url_image | replace('image', 'image1') }}</g:image_link>
+                {% if product.images | length > 1 %}
+                 {% for image in product.images | limit(10) %}
+                  {% if not loop.first %}
+                  <g:additional_image_link>
+                   {{ image | url_image | replace('image', 'image' ~ loop.index) }}
+                  </g:additional_image_link> 
+                  {% endif %}
+                 {% endfor %}
+                {% endif %}
+                <g:product_type>
+                 <![CDATA[
+                  {% if product.categories %}
+                   {% for category in product.categories | limit(1) %}
+                    {{ category.title }}  {% if category.subs|length > 0 %}
+                     {% for subcategory in category.subs | limit(2) %} > {{ subcategory.title }}             
+                      {% if subcategory.subs|length > 0 %}
+                       {% for subsubcategory in subcategory.subs %}
+                        >  {{ subsubcategory.title }}
+                       {% endfor %}
+                      {% endif %}
+                     {% endfor %}
+                   {% endif %}
+                  {% endfor %}
+                 {% endif %}
+                ]]>
+               </g:product_type>
+                {% if product.available %}
+                    <g:availability>in stock</g:availability>
+                {% else %}
+                    <g:availability>out of stock</g:availability>
+                {% endif %}
+                {% if product.price.price_old_incl %}
+                   <g:price>{{ product.price.price_old_incl | money_float }} {{ shop.currency | upper }}</g:price>
+                   <g:sale_price>{{ product.price.price_incl | money_float }} {{ shop.currency | upper }}</g:sale_price>
+                {% else %}
+                   <g:price>{{ product.price.price_incl | money_float }} {{ shop.currency | upper }}</g:price>
+                {% endif %}
+                {% if product.brand %}
+                    <g:brand>{{ product.brand.title | cdata }}</g:brand>
+                {% endif %}
+                <g:condition>new</g:condition>
+                <g:gtin>{{ product.ean | cdata }}</g:gtin>
+                <g:mpn>{{ product.code | cdata }}</g:mpn>
+                {% if product.shipping %}
+                    <g:shipping>
+                        <g:country>{{ shop.country | cdata }}</g:country>
+                        <g:price>{{ product.shipping.price | money_float }} {{ shop.currency | upper }}</g:price>
+                    </g:shipping>
+                {% endif %}
+            </item>
+        {% endfor %}
+    </channel>
+</rss>
