@@ -77,6 +77,26 @@ class ApiResource(Mapping):
         """
         pass
 
+    def as_dict(self):
+        """Return a flat, predictable dict of this resource's scalar data.
+
+        Calls ``nested_json_to_attr()`` first so any derived attributes
+        (e.g. ``price_default`` on RSeries Items) are populated before
+        extraction.
+
+        Keys use the API's own field names. Only scalar values (str, int,
+        float, bool, None) are included — nested dicts and lists are omitted.
+        Call ``dict(self)`` directly if you need the full nested structure.
+        """
+        self.nested_json_to_attr()
+        result = {}
+        for key, val in self.items():
+            if key.startswith("_"):
+                continue
+            if isinstance(val, (str, int, float, bool)) or val is None:
+                result[key] = val
+        return result
+
 
 class ApiSubResource(ApiResource):
     parent_resource = ""
@@ -231,10 +251,31 @@ class ListableApiResource(ApiResource):
             for obj in cls._create_object(response, connection=connection):
                 yield obj
 
+    @classmethod
+    def sync_records(cls, connection=None, since=None, **params):
+        """Return all records, optionally filtered to those updated since *since*.
 
-# This all needs to be moved to RSeriesApiResource class
+        C / X / E series edition — uses ``updated_at_min`` filter convention.
+        Returns a list (same contract as ``listall``).
+
+        For R-Series resources, see ``RSeriesApiResource.sync_records``
+        which uses the RSeries filter syntax and streams results.
+        """
+        if since is not None:
+            params["updated_at_min"] = since.strftime("%Y-%m-%d %H:%M:%S")
+        return cls.listall(connection=connection, **params)
+
+
+# This class is superseded by RSeriesApiResource in rseries/rseriesbase.py.
+# Kept here for backwards compatibility with any external code that inherits
+# from it directly.  New code should use RSeriesApiResource instead.
 class ListableRetailApiResource(ListableApiResource):
-    """Lightspeed Retail API handles pagination differently, so let's override a few things"""
+    """Deprecated — use ``RSeriesApiResource`` from rseries.rseriesbase instead.
+
+    This class remains for backwards compatibility.  Its pagination logic
+    has been consolidated into ``RSeriesApiResource``.  All built-in RSeries
+    resource classes now inherit from ``RSeriesApiResource`` directly.
+    """
 
     created_at = "createTime"
     updated_at = "timeStamp"

@@ -1,7 +1,8 @@
 from ..base import *
+from .rseriesbase import *
 
 
-class RSeriesItems(ListableRetailApiResource, CreateableApiResource, UpdateableRetailApiResource, DeleteableApiResource):
+class RSeriesItems(RSeriesApiResource, CreateableApiResource, UpdateableRetailApiResource, DeleteableApiResource):
     resource_name = "Item"
     resource_id = "itemID"
 

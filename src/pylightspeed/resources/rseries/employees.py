@@ -1,5 +1,6 @@
 from ..base import *
+from .rseriesbase import *
 
 
-class RSeriesEmployees(ListableRetailApiResource, CountableApiResource):
+class RSeriesEmployees(RSeriesApiResource, CountableApiResource):
     resource_name = 'Employee'

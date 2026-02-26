@@ -12,6 +12,14 @@ from .base import *
 # All ecommerce resources have a resource_id of 'id' because that is the primary key for the ecommerce database so that is then base class ID, 
 # but Retail resources have different primary keys and need to be overridden.
 
+# For RSeries resources, import and use RSeriesApiResource:
+# from .rseries.rseriesbase import RSeriesApiResource
+# class Templates(RSeriesApiResource, CreateableApiResource, UpdateableRetailApiResource, DeleteableApiResource):
+#
+# For CSeries/XSeries/ESeries resources, use ListableApiResource:
+# class Templates(ListableApiResource, CreateableApiResource, UpdateableApiResource, DeleteableApiResource):
+#
+# ListableRetailApiResource below is kept for reference only — it is deprecated.
 class Templates(ListableRetailApiResource, CreateableApiResource,
                UpdateableRetailApiResource, DeleteableApiResource):
     resource_name = 'Template'

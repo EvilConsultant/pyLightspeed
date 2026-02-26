@@ -1,7 +1,8 @@
 from ..base import *
+from .rseriesbase import *
 
 
-class RSeriesCustomers(ListableRetailApiResource, CreateableApiResource, UpdateableRetailApiResource, DeleteableApiResource):
+class RSeriesCustomers(RSeriesApiResource, CreateableApiResource, UpdateableRetailApiResource, DeleteableApiResource):
     resource_name = "Customer"
     resource_id = "customerID"
 
