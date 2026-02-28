@@ -72,8 +72,10 @@ def mock_token_post():
         "token_type": "bearer",
         "scope": "employee:all",
         "expires_in": 3600,
-        # Note: refresh responses from Lightspeed do NOT include refresh_token;
-        # the connection code reconstructs the file using the stored one.
+        # Lightspeed ALWAYS issues a new refresh_token on every refresh and
+        # immediately revokes the old one.  The connection must save this new
+        # refresh_token, not the old one from the token store.
+        "refresh_token": REFRESHED_REFRESH,
     }
     with patch("pylightspeed.connection.requests.post", return_value=mock_response):
         yield mock_response
@@ -166,6 +168,26 @@ class TestLightspeedRSeriesApi:
             token_file=token_file,
         )
         assert api.connection.access_token == REFRESHED_TOKEN
+
+    def test_new_refresh_token_saved_after_refresh(self, mock_token_post, token_file):
+        """The NEW refresh_token from the OAuth response must be persisted.
+
+        Lightspeed issues a brand-new refresh_token on every refresh and
+        immediately revokes the old one.  Any code that re-saves the *old*
+        refresh_token will cause the next refresh to fail with invalid_grant.
+        """
+        LightspeedRSeriesApi(
+            account_id="190211",
+            client_id="test_client_id",
+            client_secret="test_client_secret",
+            token_file=token_file,
+        )
+        with open(token_file) as f:
+            saved = json.load(f)
+        assert saved["refresh_token"] == REFRESHED_REFRESH, (
+            "Token store must hold the NEW refresh_token issued by Lightspeed, "
+            "not the stale one from the previous token store."
+        )
 
     def test_bearer_token_in_session_headers(self, mock_token_post, token_file):
         """The OAuth bearer token should be set in the session Authorization header."""

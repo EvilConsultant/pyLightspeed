@@ -442,8 +442,12 @@ class Connection(object):
                     headers=headers,
                     params=params,
                 )
-                # if there is a 401 Unauthorized error, we need to refresh the token and try again
+                # if there is a 401 Unauthorized error, we need to refresh the token and try again.
+                # Reset expires so that OAuth connections always re-read the token store — another
+                # process (e.g. bottlemover) may have already refreshed the token in MySQL.
                 if result.status_code == 401:
+                    if hasattr(self, "expires"):
+                        self.expires = 0.0
                     self._manage_token_refresh()
                     result = self._session.request(
                         method,
@@ -790,7 +794,24 @@ class RSeriesConnection(OAuthConnection):
             "grant_type": "refresh_token",
         }
         response = requests.post(self._token_refresh_url, data=payload)
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except requests.HTTPError as exc:
+            try:
+                err_body = response.json()
+            except Exception:
+                err_body = {}
+            error_code = err_body.get("error", "")
+            if response.status_code == 400 and error_code == "invalid_grant":
+                raise MissingTokenError(
+                    f"R-Series refresh token is invalid or has been revoked "
+                    f"(store: {self._token_store!r}). "
+                    "The Retail POS user must re-authorize the application. "
+                    "Call RSeriesConnection.get_authorization_url() to start the OAuth flow, "
+                    "then RSeriesConnection.exchange_code_for_token() and save the result to "
+                    "your token store."
+                ) from exc
+            raise
         new_codes = response.json()
 
         self.access_token = new_codes["access_token"]
@@ -799,12 +820,14 @@ class RSeriesConnection(OAuthConnection):
         self.expires_in = new_codes.get("expires_in", 3600)
         self.expires = time.time() + int(self.expires_in)
 
+        # IMPORTANT: Lightspeed issues a *new* refresh token on every refresh and
+        # immediately revokes the old one.  Always save new_codes["refresh_token"].
         token_data = {
             "access_token": self.access_token,
             "expires_in": self.expires_in,
             "token_type": self.token_type,
             "scope": self.scope,
-            "refresh_token": codes["refresh_token"],  # preserved — not returned on refresh
+            "refresh_token": new_codes["refresh_token"],
             "last_run": time.time(),
         }
         self._token_store.save(token_data)
@@ -1336,7 +1359,24 @@ class XSeriesOauthConnection(XSeriesPersonalConnection):
             "grant_type": "refresh_token",
         }
         response = requests.post(self._token_endpoint(), data=payload)
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except requests.HTTPError as exc:
+            try:
+                err_body = response.json()
+            except Exception:
+                err_body = {}
+            error_code = err_body.get("error", "")
+            if response.status_code == 400 and error_code == "invalid_grant":
+                raise MissingTokenError(
+                    f"X-Series refresh token is invalid or has been revoked "
+                    f"(store: {self._token_store!r}). "
+                    "The Retail POS user must re-authorize the application. "
+                    "Call XSeriesOauthConnection.get_authorization_url() to start the OAuth flow, "
+                    "then XSeriesOauthConnection.exchange_code_for_token() and save the result to "
+                    "your token store."
+                ) from exc
+            raise
         new_codes = response.json()
 
         # Update in-memory state
