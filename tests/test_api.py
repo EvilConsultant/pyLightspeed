@@ -51,7 +51,7 @@ def token_file(tmp_path):
         "token_type": "bearer",
         "scope": "employee:all",
         "refresh_token": "stored_refresh_token_xyz789",
-        "last_run": time.time() - 100,  # in the past — not used by the code
+        "last_run": time.time() - 7200,  # 2 hours ago — token is expired
     }
     f = tmp_path / "test_codes.json"
     f.write_text(json.dumps(codes))
