@@ -1,65 +1,48 @@
 """
 Connection Objects
-=======
-Connection handles the lower level stuff for the api such as making requests, handling responses, managing tokens, and rate limits.
+==================
 
-The high level API provided by pylightspeed.api.LightspeedApi is a wrapper around a lower level api in pylightspeed.connection.
-This can be accessed through api.connection, and provides helper methods for get/post/put/delete operation
+Handles the lower-level details of the API: making requests, managing responses,
+token storage, and rate limits.
 
-Each series of Lightspeed API has a different way of handling authentication and rate limits, so the Connection class is subclassed for each series.
-This also includes some standard methods including :py:func:`pylightspeed.connection._handle_response`, and :py:func:`pylightspeed.connection._handle_result` which are overridden by the subclasses.
+The high-level API (`pylightspeed.api.LightspeedApi`) wraps a lower-level connection
+from this module, accessible via `api.connection`. It provides helper methods for
+`get`/`post`/`put`/`delete` operations.
 
-.. note::
+Each Lightspeed API series has a different authentication and rate-limiting approach,
+so `Connection` is subclassed for each series.
 
-   While pagination is often specific to an API or connection, pyLightspeed keeps handling at the resource level to allow for more flexibility with resources/endpoints
-   that have different pagination requirements based on version or other factors.
-
+Note:
+    While pagination is often specific to an API or connection, pyLightspeed keeps
+    pagination handling at the resource level to allow for more flexibility with
+    resources/endpoints that have different pagination requirements based on version
+    or other factors.
 """
 
+from abc import ABC, abstractmethod
 from decimal import Decimal
 import base64
 import hashlib
-import hmac
+import os
+import secrets
+import tempfile
 
 try:
     from urllib import urlencode
 except ImportError:
     from urllib.parse import urlencode
 
-
 import requests
-
-# import jwt
-
 import json
 import time
-import os
-
-
 from time import sleep
 
 from .exception import *
 
-# %% Logging Setup and Config
-import logging
+from loguru import logger
+logger = logger.bind(module="pylightspeed.connection")
 
-# Use the new centralized logging configuration.
-_logger_name = "BA.pylightspeed.connection"
-logger = logging.getLogger(_logger_name)
-
-_env_level = os.getenv("PYLIGHTSPEED_LOG_LEVEL")
-if _env_level:
-    try:
-        logger.setLevel(getattr(logging, _env_level.upper()))
-    except AttributeError:
-        logger.warning(
-            "Invalid PYLIGHTSPEED_LOG_LEVEL '%s', using inherited level",
-            _env_level,
-            extra={"event": "config.warning"},
-        )
-
-logger.debug("Logger for connection.py initialized", extra={"event": "logger.init"})
-# %%
+logger.debug("connection module loaded")
 
 
 # Handle Decimal types in JSON, see: https://stackoverflow.com/questions/1960516/python-json-serialize-a-decimal-object
@@ -72,6 +55,184 @@ class DecimalEncoder(json.JSONEncoder):
         return json.JSONEncoder.default(self, obj)
 
 
+# ---------------------------------------------------------------------------
+# Token Storage
+# ---------------------------------------------------------------------------
+
+class TokenStore(ABC):
+    """Abstract base class for OAuth token persistence.
+
+    Implement :meth:`load` and :meth:`save` to use an alternative storage
+    backend (database, secrets manager, environment variables, etc.).
+    The built-in :class:`FileTokenStore` persists tokens to a local JSON file.
+    """
+
+    @abstractmethod
+    def load(self) -> dict | None:
+        """Return the stored token dict, or *None* if no token has been saved yet."""
+        ...
+
+    @abstractmethod
+    def save(self, token_data: dict) -> None:
+        """Persist *token_data* so it can be retrieved by a subsequent :meth:`load`."""
+        ...
+
+
+class FileTokenStore(TokenStore):
+    """Stores OAuth tokens in a local JSON file using atomic writes.
+
+    Atomic writes (write to a temp file, then `os.replace`) prevent
+    credential-file corruption if the process is interrupted mid-write.
+
+    Args:
+        path (str): Absolute or relative path to the token JSON file.
+    """
+
+    def __init__(self, path: str):
+        self.path = path
+
+    def load(self) -> dict | None:
+        try:
+            with open(self.path, "r") as f:
+                return json.load(f)
+        except FileNotFoundError:
+            return None
+
+    def save(self, token_data: dict) -> None:
+        dir_ = os.path.dirname(os.path.abspath(self.path))
+        fd, tmp_path = tempfile.mkstemp(dir=dir_, suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w") as f:
+                json.dump(token_data, f, indent=4)
+            os.replace(tmp_path, self.path)
+        except Exception:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
+
+    def __repr__(self) -> str:
+        return f"FileTokenStore(path={self.path!r})"
+
+
+class MySQLTokenStore(TokenStore):
+    """Stores OAuth tokens in a MySQL ``stores.config`` JSON column.
+
+    The token dict is persisted as the value of *config_key* inside the
+    ``config`` JSON column on the row identified by *store_id*.  All other
+    keys in ``config`` are preserved — only the token key is touched.
+
+    This lets all apps (bottleadmin, bottlemover, etc.) share a single token
+    that auto-refreshes in place without any file-system coordination.
+
+    Connection parameters default to the standard ``MYSQL_*`` environment
+    variables used throughout the bottle- ecosystem, so no additional
+    configuration is needed when running inside those apps.
+
+    Args:
+        store_id (int): The ``stores.id`` value whose config holds the token.
+        config_key (str): JSON key within ``stores.config`` to store the token
+            under.  Defaults to ``"LSRETAIL_TOKEN"``.
+        host (str | None): MySQL host.  Defaults to ``MYSQL_HOST`` env var or
+            ``"127.0.0.1"``.
+        port (int | None): MySQL port.  Defaults to ``MYSQL_PORT`` env var or
+            ``3306``.
+        user (str | None): MySQL user.  Defaults to ``MYSQL_USER`` env var or
+            ``"root"``.
+        password (str | None): MySQL password.  Defaults to ``MYSQL_PASSWORD``
+            env var or ``""``.
+        database (str | None): MySQL database name.  Defaults to ``MYSQL_DB``
+            env var or ``"bottleadmin"``.
+
+    Requires:
+        ``pymysql`` — install with ``pip install pylightspeed[mysql]``.
+    """
+
+    def __init__(
+        self,
+        store_id: int,
+        config_key: str = "LSRETAIL_TOKEN",
+        host: str | None = None,
+        port: int | None = None,
+        user: str | None = None,
+        password: str | None = None,
+        database: str | None = None,
+    ):
+        self.store_id = store_id
+        self.config_key = config_key
+        self._host = host or os.getenv("MYSQL_HOST", "127.0.0.1")
+        self._port = int(port or os.getenv("MYSQL_PORT", "3306"))
+        self._user = user or os.getenv("MYSQL_USER", "root")
+        self._password = password or os.getenv("MYSQL_PASSWORD", "")
+        self._database = database or os.getenv("MYSQL_DB", "bottleadmin")
+
+    def _connect(self):
+        try:
+            import pymysql
+            import pymysql.cursors
+        except ImportError as exc:
+            raise ImportError(
+                "MySQLTokenStore requires pymysql. "
+                "Install it with: pip install pylightspeed[mysql]"
+            ) from exc
+        return pymysql.connect(
+            host=self._host,
+            port=self._port,
+            user=self._user,
+            password=self._password,
+            database=self._database,
+            cursorclass=pymysql.cursors.DictCursor,
+        )
+
+    def load(self) -> dict | None:
+        conn = self._connect()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"SELECT JSON_EXTRACT(config, %s) AS token "
+                    f"FROM stores WHERE id = %s",
+                    (f"$.{self.config_key}", self.store_id),
+                )
+                row = cur.fetchone()
+            if row is None:
+                raise RuntimeError(
+                    f"MySQLTokenStore: no stores row for id={self.store_id}"
+                )
+            raw = row["token"]
+            if raw is None:
+                return None
+            # MySQL JSON_EXTRACT returns a string; pymysql may auto-decode it
+            return json.loads(raw) if isinstance(raw, str) else raw
+        finally:
+            conn.close()
+
+    def save(self, token_data: dict) -> None:
+        conn = self._connect()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE stores "
+                    "SET config = JSON_SET(COALESCE(config, '{}'), %s, CAST(%s AS JSON)) "
+                    "WHERE id = %s",
+                    (
+                        f"$.{self.config_key}",
+                        json.dumps(token_data),
+                        self.store_id,
+                    ),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def __repr__(self) -> str:
+        return (
+            f"MySQLTokenStore(store_id={self.store_id!r}, "
+            f"config_key={self.config_key!r}, "
+            f"db={self._database!r}@{self._host}:{self._port})"
+        )
+
+
 class Connection(object):
     """
     Connection class manages the connection handles the basics of making requests, handling responses, CRUD operations, and rate limits.
@@ -79,21 +240,21 @@ class Connection(object):
     """
 
     def __init__(self, host, auth, api_path="", format="json"):
-        """
-        Initializes the connection with the host, auth, and api_path. This only handles very simple APIs = like Lightspeed C-Series
-        The host is the base URL for the API, the auth is the authentication method (usually a tuple of username and password),
-        and the api_path is the path to the API, which should include the version and store ID.
-        The format is the format of the response, either 'json' or 'xml'.
+        """Initializes the connection with the host, auth, and api_path.
 
-        :param host: The base URL for the API.
-        :type host: str
-        :param auth: The authentication method for the API.
-        :type auth: tuple
-        :param api_path: The path to the API, including the version and store ID.
-        :type api_path: str
-        :param format: The format of the response, either 'json' or 'xml'.
-        :type format: str
+        This only handles very simple APIs like Lightspeed C-Series. Build any API
+        version or store IDs into *api_path* in the subclass ``__init__`` so that
+        the final *api_path* passed here still contains ``{}`` as the resource
+        placeholder used by `full_path`.
 
+        Args:
+            host (str): The base URL for the API (no scheme).
+            auth (tuple): The authentication method — typically a ``(key, secret)``
+                tuple passed to ``requests.Session.auth``.
+            api_path (str): The URL path template; must contain ``{}`` so that
+                the resource name can be interpolated by `full_path`.
+            format (str): Response format extension, either ``'json'`` or ``'xml'``.
+                Defaults to ``'json'``.
         """
         self.host = host
         # Note: api_path needs to be built such that it can be formatted with the resource name and id. For example, /en/Item/1234
@@ -121,7 +282,7 @@ class Connection(object):
 
         self._last_response = None  # for debugging
 
-    def full_path(self, url):
+    def full_path(self, url: str) -> str:
         """
         Constructs the full URL path for the given endpoint URL. This can be easily overridden by subclasses to handle different API paths.
 
@@ -171,20 +332,13 @@ class Connection(object):
                 filter_string = query["filter"]
                 del query["filter"]
 
-        # This should attach the API authorization to the request if it is missing.
-        # Removing this and adding the Auth check below because it fails to attach the auth if you pass in a header - for example a header setting the format to XML
-        # if headers is None:
-        #     headers = self.headers
-
-        # if authorization is missing, add it by appending self.headers to headers dict
-        # BUILDING HEADERS SUCKS AND NEEDS TO BE FIXED
+        # Merge request-level headers with the session defaults.
+        # Session headers (including the Bearer token) are used as the base;
+        # any explicitly-passed headers take precedence.
         if headers is None:
-            headers = self._session.headers
-        # Check if authorization is needed and exists in headers, otherwise add it and only it - no other keys or headers
-        if "authorization" not in headers and self._session.headers.get(
-            "authorization"
-        ):
-            headers["authorization"] = self._session.headers.get("authorization")
+            headers = dict(self._session.headers)
+        elif "authorization" not in headers and self._session.headers.get("authorization"):
+            headers["authorization"] = self._session.headers["authorization"]
 
         # If url is a fragment such as 'Item' or 'Item/5', build it into a full LS url. Or pass a full URL
         if url and url[:4] != "http":
@@ -317,7 +471,7 @@ class Connection(object):
 
                 return result
             except requests.exceptions.RequestException as e:
-                logger.error(f"ERROR: {e}", exc_info=True)
+                logger.error(f"ERROR: {e}")
                 raise e
 
     # CRUD methods
@@ -383,12 +537,17 @@ class Connection(object):
         logger.debug("OUTPUT: %s" % response.content)
         return self._handle_response(url, response)
 
-    def post(self, url, data, headers={}, files=None):
-        """
-        POST request for creating new objects. If you are uploading a file, pass the file object in the files parameter.
-        :param data: Typically a dictionary, but if a file is being uploaded, it should be a string such as data = {'data': '{"description": "My Image", "ordering": "1", "itemID": "123"}'}
-        :param files: should be a requests file object like {'image': (filename, file, 'image/jpeg')}
-        :param headers: should be left blank unless you want to override the default headers
+    def post(self, url: str, data, headers: dict = {}, files: dict | None = None):
+        """POST request for creating new objects.
+
+        Args:
+            url (str): The endpoint URL.
+            data (dict | str): Typically a dictionary. If uploading a file, may
+                be a JSON string such as
+                ``'{"description": "My Image", "itemID": "123"}'``.
+            headers (dict): Override the default headers if needed.
+            files: A requests file object, e.g.
+                ``{'image': (filename, file, 'image/jpeg')}``.
         """
         response = self._run_method(
             "POST", url, data=data, files=files, headers=headers
@@ -408,7 +567,7 @@ class Connection(object):
             # attaches the raw json to the result
             return result
         except Exception as e:  # json might be invalid, or store might be down
-            e.__docs__ += (
+            e.__doc__ = (e.__doc__ or "") + (
                 " (_handle_response failed to decode JSON: " + str(res.content) + ")"
             )
             raise
@@ -435,10 +594,10 @@ class Connection(object):
                 "%d %s @ %s: %s" % (res.status_code, res.reason, url, res.content), res
             )
         elif res.status_code == 401:
-            logging.warning(
+            logger.warning(
                 f"WARNING: TOKEN ERROR {res.status_code} {res.reason} @ {url}: {res.content}"
             )
-            logging.debug(f"Headers are: {self._session.headers}")
+            logger.debug(f"Headers are: {self._session.headers}")
 
             raise Unauthorised(
                 "%d %s @ %s: %s" % (res.status_code, res.reason, url, res.content), res
@@ -471,57 +630,69 @@ class Connection(object):
 
 
 class OAuthConnection(Connection):
-    """
-    Class for making OAuth requests on the Lightspeed Retail API
-    Provide access_token and token_file if you already have one - it will be refreshed if it expires.
-    https://developers.lightspeedhq.com/retail/authentication/authentication-overview/
-    Otherwise, you may use fetch_token with the code, context, and scope passed to your application's callback url
-    to retrieve an access token.
+    """Base class for Lightspeed OAuth connections.
 
-    PARAMETERS:
-    client_id: the client id of your application
-    client_secret: the client sekret key of your application
-    token_file: Full path to a file to store the access token in. Default: codes.json
-    host: the hostname of the Lightspeed API. Default: api.lightspeedapp.com
-    api_path: the path to the API. Default: '/API/Account/{}/{}'
+    Manages OAuth token lifecycle: reading from a `TokenStore`, refreshing
+    on expiry, and persisting updated tokens. Subclasses implement the actual
+    token-refresh logic for their specific API series.
+
+    Args:
+        account_id: The Lightspeed account / store ID embedded in API paths.
+        client_id (str): OAuth client ID from the Lightspeed developer dashboard.
+        client_secret (str): OAuth client secret.
+        token_file (str): Path to a JSON file holding the OAuth tokens. Ignored when
+            *token_store* is provided. Defaults to ``"codes.json"``.
+        host (str): API hostname.
+        api_path (str): URL path template (must contain ``{}`` placeholders for
+            account_id and resource).
+        token_store (TokenStore | None): A `TokenStore` instance. When provided,
+            *token_file* is ignored. When omitted, a `FileTokenStore` wrapping
+            *token_file* is created automatically.
     """
 
     def __init__(
         self,
-        account_id,
-        client_id,
-        client_secret,
-        token_file="codes.json",
-        host="api.lightspeedapp.com",
-        api_path="/API/Account/{}/{}",
+        account_id: str | None,
+        client_id: str,
+        client_secret: str,
+        token_file: str = "codes.json",
+        host: str = "api.lightspeedapp.com",
+        api_path: str = "/API/Account/{}/{}",
+        token_store: TokenStore | None = None,
     ):
-        # Data for setting up OAuth
         self.account_id = account_id
         self.client_id = client_id
         self.client_secret = client_secret
-        self.token_file = token_file
         self.host = host
         self.api_path = api_path
 
-        # Check Lightspeed documentation for this
-        self.access_token_url = "https://cloud.lightspeedapp.com/oauth/access_token.php"
-        self.authorization_base_url = (
-            "https://cloud.lightspeedapp.com/oauth/authorize.php"
-        )
+        # Token storage — prefer an explicit TokenStore; fall back to a file.
+        if token_store is not None:
+            self._token_store = token_store
+        else:
+            if token_file is None:
+                token_file = "codes.json"
+            self._token_store = FileTokenStore(token_file)
+
+        # Expose token_file for backwards-compatible access and logging.
+        self.token_file = getattr(self._token_store, "path", str(self._token_store))
+
+        # Current OAuth endpoints (R-Series)
+        self._token_refresh_url = "https://cloud.lightspeedapp.com/auth/oauth/token"
+        self._authorization_base_url = "https://cloud.lightspeedapp.com/auth/oauth/authorize"
+
         self.response = None
-        # Resource is used to carry the name of the resource being requested in case it is needed elsewhere.
         self.resource = ""
         self.request_counter = 0
         self.refresh_token = ""
-        # Timeouts are happening more frequently on Azure, so set connect to 7 seconds and read to 30 seconds
         self.timeout = (10, 30)
 
-        # Add these to handle pagination
+        # Pagination state
         self.count = 0
         self.offset = 1
         self.limit = 100
 
-        # Load the access token from the token file and set properties related to refresh
+        # Token state — populated by _manage_token_refresh()
         self.access_token = ""
         self.token_type = ""
         self.scope = ""
@@ -532,18 +703,11 @@ class OAuthConnection(Connection):
         self._session.headers = {
             "Accept": "application/json",
             "authorization": f"Bearer {self.access_token}",
-        }  # I use json, but you can change this to XML if you want. See Data Formats https://developers.lightspeedhq.com/retail/introduction/introduction/
+        }
 
-        logging.info(
-            f"{self}: Creating new API Connection to (Store: {self.account_id})"
-        )
+        logger.info(f"{self.__class__.__name__}: Creating connection (account={self.account_id})")
 
-        # OG: But LS does not use anything in the header, so don't need to do anything with this
-        # if access_token and store_hash:
-        #     self._session.headers.update(self._oauth_headers(client_id, access_token))
-
-        self._last_response = None  # for debugging
-
+        self._last_response = None
         self.rate_limit = {}
 
         self._manage_token_refresh()
@@ -551,227 +715,208 @@ class OAuthConnection(Connection):
     def full_path(self, url):
         return "https://" + self.host + self.api_path.format(self.account_id, url)
 
-    @staticmethod
-    def _oauth_headers(cid, atoken):
-        return {"X-Auth-Client": cid, "X-Auth-Token": atoken}
-
-    @staticmethod
-    def verify_payload(signed_payload, client_secret):
-        """
-        Given a signed payload (usually passed as parameter in a GET request to the app's load URL) and a client secret,
-        authenticates the payload and returns the user's data, or False on fail.
-        Uses constant-time str comparison to prevent vulnerability to timing attacks.
-        """
-        encoded_json, encoded_hmac = signed_payload.split(".")
-        dc_json = base64.b64decode(encoded_json)
-        signature = base64.b64decode(encoded_hmac)
-        expected_sig = hmac.new(
-            client_secret.encode(), base64.b64decode(encoded_json), hashlib.sha256
-        ).hexdigest()
-        authorised = hmac.compare_digest(signature, expected_sig.encode())
-        return json.loads(dc_json.decode()) if authorised else False
-
-    def fetch_token(
-        self,
-        client_secret,
-        code,
-        context,
-        scope,
-        redirect_uri,
-        token_url="https://cloud.lightspeedapp.com/oauth/access_token.php",
-    ):
-        """
-        TODO: THIS DOES NOT WORK. Leaving it here if I want to try it again later.
-        Fetches a token from given token_url, using given parameters, and sets up session headers for
-        future requests.
-        redirect_uri should be the same as your callback URL.
-        code, context, and scope should be passed as parameters to your callback URL on app installation.
-        Raises HttpException on failure (same as Connection methods).
-        """
-        res = self.post(
-            token_url,
-            {
-                "client_id": self.client_id,
-                "client_secret": client_secret,
-                "code": code,
-                "context": context,
-                "scope": scope,
-                "grant_type": "authorization_code",
-                "redirect_uri": redirect_uri,
-            },
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-        )
-        self._session.headers.update(
-            self._oauth_headers(self.client_id, res["access_token"])
-        )
-        return res
-
 
 class RSeriesConnection(OAuthConnection):
+    """Connection for the Lightspeed Retail (R-Series) API using OAuth 2.0.
+
+    On instantiation the token store is checked and the access token is refreshed
+    if it has expired.  If no valid token is found a :class:`MissingTokenError` is
+    raised — use :meth:`get_authorization_url` and :meth:`exchange_code_for_token`
+    to perform the one-time OAuth setup (e.g. from a CLI script), then persist the
+    result via your :class:`TokenStore`.
+    """
+
     def __init__(
         self,
-        account_id,
-        client_id,
-        client_secret,
-        token_file="codes.json",
-        host="api.lightspeedapp.com",
-        api_path="/API/Account/{}/{}",
+        account_id: str | None,
+        client_id: str,
+        client_secret: str,
+        token_file: str = "codes.json",
+        host: str = "api.lightspeedapp.com",
+        api_path: str = "/API/Account/{}/{}",
+        token_store: TokenStore | None = None,
     ):
-        # run the parent's init
         super().__init__(
-            account_id, client_id, client_secret, token_file, host, api_path
+            account_id, client_id, client_secret, token_file, host, api_path,
+            token_store=token_store,
         )
 
     def _manage_token_refresh(self):
-        """Confirm if there is a rate limit that needs checked or refreshed before running make_request"""
-        # https://developers.lightspeedhq.com/retail/authentication/refresh-token/
-        # We are holding the expiration time in the connection, so we can check to see if it is expired
-        # If it is expired, then we need to refresh the token
-        if time.time() >= self.expires:
-            # On initiation, the object checks to see if there are codes (access_token and refresh_token) saved locally. If it finds them, it reads them, assigns them to
-            # properties, refreshes them if needed, and returns
-            # 1. Check to see if there is token_file already witha refresh token in it
-            logging.info(
-                f"{self}:TOKEN REFRESH: Hold while the token at {self.token_file} is refreshed..."
+        """Refresh the R-Series access token when expired.
+
+        Reads the refresh token from the token store, exchanges it for a new
+        access token via the Lightspeed OAuth endpoint, then persists the updated
+        token data.
+
+        Raises :class:`MissingTokenError` if the token store contains no valid
+        token.  In that case use :meth:`get_authorization_url` and
+        :meth:`exchange_code_for_token` to bootstrap the OAuth flow.
+        """
+        if time.time() < self.expires:
+            logger.debug(
+                f"{self}: Token still valid for {self.expires - time.time():.0f}s"
             )
-            try:
-                # write out the codes to a file
-                with open(self.token_file, "r") as f:
-                    codes = json.load(f)
-                    # Your refresh token does not expire, so it is actually the important one.
-                    logging.debug(
-                        f"{self}:TOKEN REFRESH: Found {self.token_file} \n Codes Contains: {codes}"
-                    )
-                    # if codes contains an "error" key, then the token is bad and we need to delete the file and throw a FileNotFoundError to recreate the codes
-                    if codes.get("error"):
-                        logging.warning(f"{self}:TOKEN REFRESH: {codes.get('error')}")
+            return
 
-                        raise FileNotFoundError(
-                            f"{self}:TOKEN REFRESH: {codes.get('error')}"
-                        )
+        logger.info(f"{self}: TOKEN REFRESH: Refreshing access token…")
 
-            except FileNotFoundError as err:
-                # TODO: Need to add back in the code that checks the environment variables for keys. This should handle both env and file keys
-                logging.warning("TOKEN REFRESH: No Codes File Found:{0}".format(err))
+        codes = self._token_store.load()
 
-                ### OLD CODE: SAving for reference
-                # # 2. If there are no keys, it should fire the process to get a temp token, authenticate the user, and write out the creds
-                # # For now we are going to do it manually by going to
-                # # https://cloud.lightspeedapp.com/oauth/authorize.php?response_type=code&client_id={YOUR CLIENT ID}&scope=employee:all
-                # # to obtain the CODE. Paste that CODE (it is in the URL returned) below and run this before the CODE expires (30 seconds)
-                # # to get your access token back.
-                # # This code only lasts 30 seconds, so hurry and paste yours here and rerun this.
-                # CODE = "xxx"
-                # # This is the payload defined by the Lightspeed API doc. My code differs from the sample code, but I think their samples have
-                # # issues, so mostly I don't use them.
-                # payload = {"client_id": self.client_id, "client_secret": self.client_secret, "code": CODE, "grant_type": "authorization_code"}
-                # # Send the payload to the API access token URL
-                # r = requests.post(self.access_token_url, data=payload)
-                # codes = r.json()
-                # logging.debug(f"{self}:TOKEN REFRESH:: Got new codes, which are: {codes}")
-
-                # Authorize to Lightspeed API OAuth
-                # This will open a browser window to the Lightspeed API OAuth page. You will need to authorize the app and then paste the URL here.
-                # You will need access to the terminal to paste the URL here.
-                # Should only need to be done once with new connections, or if the codes file is deleted.
-                import webbrowser
-                from urllib.parse import urlencode, parse_qs
-
-                # Replace these with your actual client_id, client_secret, and redirect_uri
-                redirect_uri = "https://127.0.0.1:5000/"  # This should match the redirect URI set in your OAuth application settings
-
-                # Step 1: Request the temporary authorization code
-
-                auth_params = {
-                    "response_type": "code",
-                    "client_id": self.client_id,
-                    "scope": "employee:all",
-                    "redirect_uri": redirect_uri,
-                }
-
-                # Construct the full authorization URL
-                auth_request_url = (
-                    f"{self.authorization_base_url}?{urlencode(auth_params)}"
-                )
-
-                # Open the authorization URL in the default web browser
-                print("Please go to this URL and authorize the application:")
-                print(auth_request_url)
-                webbrowser.open(auth_request_url)
-
-                # After user authorization, you'll get a 'code' parameter in the redirect URL
-                # For this example, we'll assume you manually paste the redirected URL here
-                redirected_url = input("Paste the full redirected URL here: ")
-                parsed_url = parse_qs(redirected_url.split("?")[1])
-                authorization_code = parsed_url.get("code")[0]
-
-                # Step 2: Request the access token
-
-                token_data = {
-                    "client_id": self.client_id,
-                    "client_secret": self.client_secret,
-                    "code": authorization_code,
-                    "grant_type": "authorization_code",
-                    "redirect_uri": redirect_uri,
-                }
-
-                response = requests.post(self.access_token_url, data=token_data)
-                response_data = response.json()
-
-                # Print the access token
-                if "access_token" in response_data:
-                    access_token = response_data["access_token"]
-                    print("Access Token:", access_token)
-                else:
-                    print("Error fetching the access token:", response_data)
-
-                # Save the codes in a file on the local system so we can get them (and refresh them) next time
-                with open(self.token_file, "w") as outfile:
-                    json.dump(response.json(), outfile, indent=4)
-
-            else:
-                # If there are codes, get the refresh token out, and force a refresh the access code
-                self.refresh_token = codes["refresh_token"]
-                # TODO - This should probably check the expiration but for now I am forcing a refresh. Need to come back and write some checking
-                payload = {
-                    "refresh_token": self.refresh_token,
-                    "client_secret": self.client_secret,
-                    "client_id": self.client_id,
-                    "grant_type": "refresh_token",
-                }
-                codes = requests.post(self.access_token_url, data=payload).json()
-                logging.debug(
-                    f"{self}:TOKEN REFRESH: Requesting new tokend from {self.access_token_url} with payload {payload} \n Response is {codes}"
-                )
-                self.access_token = codes["access_token"]
-                self.token_type = codes["token_type"]
-                self.scope = codes["scope"]
-                self.expires_in = codes["expires_in"]
-                self.expires = time.time() + int(self.expires_in)
-
-                # The data returned in a refresh doesn't include the refresh_token, and we need to update the codes.json file, so rebuild it and write it out to the file
-                # TODO - Need to look up the way to append to a dictionary - probably don't need to rebuild the whole thing
-                new_codes = {
-                    "access_token": codes["access_token"],
-                    "expires_in": codes["expires_in"],
-                    "token_type": codes["token_type"],
-                    "scope": codes["scope"],
-                    "refresh_token": self.refresh_token,
-                    "last_run": time.time(),
-                }
-                with open(self.token_file, "w") as outfile:
-                    json.dump(new_codes, outfile, indent=4)
-
-                # Now we have nice, fresh codes we can buld the headers property that the API will use
-                self._session.headers["authorization"] = f"Bearer {self.access_token}"
-
-                logging.info(
-                    f"{self}:TOKEN REFRESH COMPLETE: {new_codes}\nExpires in {self.expires_in} seconds."
-                )
-        else:
-            logging.debug(
-                f"{self}:TOKEN REFRESH: Token {self.access_token} is still good for {self.expires - time.time()} seconds."
+        if codes is None:
+            raise MissingTokenError(
+                f"No token found in {self._token_store!r}. "
+                "Run the OAuth setup flow: call RSeriesConnection.get_authorization_url() "
+                "to generate the authorization URL, direct a user to it, then pass the "
+                "returned code to RSeriesConnection.exchange_code_for_token() and save the "
+                "result to your token store."
             )
+
+        if codes.get("error"):
+            raise MissingTokenError(
+                f"Token store contains an error entry: {codes['error']}. "
+                "Delete the token file and re-authorise."
+            )
+
+        if "refresh_token" not in codes:
+            raise MissingTokenError(
+                f"Token data in {self._token_store!r} is missing 'refresh_token'. "
+                "Re-run the OAuth setup flow."
+            )
+
+        payload = {
+            "refresh_token": codes["refresh_token"],
+            "client_secret": self.client_secret,
+            "client_id": self.client_id,
+            "grant_type": "refresh_token",
+        }
+        response = requests.post(self._token_refresh_url, data=payload)
+        response.raise_for_status()
+        new_codes = response.json()
+
+        self.access_token = new_codes["access_token"]
+        self.token_type = new_codes.get("token_type", "bearer")
+        self.scope = new_codes.get("scope", codes.get("scope", self.scope))
+        self.expires_in = new_codes.get("expires_in", 3600)
+        self.expires = time.time() + int(self.expires_in)
+
+        token_data = {
+            "access_token": self.access_token,
+            "expires_in": self.expires_in,
+            "token_type": self.token_type,
+            "scope": self.scope,
+            "refresh_token": codes["refresh_token"],  # preserved — not returned on refresh
+            "last_run": time.time(),
+        }
+        self._token_store.save(token_data)
+        self._session.headers["authorization"] = f"Bearer {self.access_token}"
+
+        logger.info(
+            f"{self}: TOKEN REFRESH COMPLETE. Expires in {self.expires_in}s."
+        )
+
+    # ------------------------------------------------------------------
+    # One-time OAuth setup helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def get_authorization_url(
+        client_id: str,
+        scope: str,
+        redirect_uri: str,
+        *,
+        state: str | None = None,
+        use_pkce: bool = True,
+    ) -> tuple[str, str, str | None]:
+        """Build the R-Series OAuth authorization URL.
+
+        Intended to be called from an interactive setup script or a web-app
+        callback handler — **not** from the connection constructor.
+
+        Args:
+            client_id (str): Your application's client ID.
+            scope (str): Space-separated list of access scopes (e.g. ``"employee:all"``).
+            redirect_uri (str): Must exactly match the redirect URI registered for
+                your OAuth client.
+            state (str | None): Optional CSRF-prevention token. A cryptographically
+                random value is generated if not provided.
+            use_pkce (bool): Generate a PKCE ``code_challenge`` (S256, strongly
+                recommended). Defaults to ``True``.
+
+        Returns:
+            tuple[str, str, str | None]: A 3-tuple ``(url, state, code_verifier)``.
+                *code_verifier* is ``None`` when *use_pkce* is ``False``; keep it
+                to pass to `exchange_code_for_token`.
+        """
+        from urllib.parse import urlencode as _urlencode
+
+        if state is None:
+            state = secrets.token_urlsafe(24)
+
+        params = {
+            "response_type": "code",
+            "client_id": client_id,
+            "scope": scope,
+            "redirect_uri": redirect_uri,
+            "state": state,
+        }
+
+        code_verifier: str | None = None
+        if use_pkce:
+            # RFC 7636 — code_verifier must be 43-128 base64url chars
+            code_verifier = secrets.token_urlsafe(96)
+            digest = hashlib.sha256(code_verifier.encode()).digest()
+            code_challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
+            params["code_challenge"] = code_challenge
+            params["code_challenge_method"] = "S256"
+
+        url = f"https://cloud.lightspeedapp.com/auth/oauth/authorize?{_urlencode(params)}"
+        return url, state, code_verifier
+
+    @staticmethod
+    def exchange_code_for_token(
+        client_id: str,
+        client_secret: str,
+        code: str,
+        redirect_uri: str,
+        *,
+        code_verifier: str | None = None,
+    ) -> dict:
+        """Exchange a temporary authorization code for access + refresh tokens.
+
+        Call this once the user has approved the authorization request and your
+        redirect URI has received the ``code`` parameter. Save the returned dict
+        to a `TokenStore` so the connection can load and refresh it on future runs.
+
+        Args:
+            client_id (str): Your application's client ID.
+            client_secret (str): Your application's client secret.
+            code (str): The short-lived code from the OAuth callback (expires in 60 s).
+            redirect_uri (str): The same redirect URI used in `get_authorization_url`.
+            code_verifier (str | None): Required if PKCE was used in
+                `get_authorization_url`.
+
+        Returns:
+            dict: Token dict with ``access_token``, ``refresh_token``,
+                ``expires_in``, etc.
+
+        Raises:
+            requests.HTTPError: If the token endpoint returns an error.
+        """
+        payload = {
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "code": code,
+            "grant_type": "authorization_code",
+            "redirect_uri": redirect_uri,
+        }
+        if code_verifier is not None:
+            payload["code_verifier"] = code_verifier
+
+        response = requests.post(
+            "https://cloud.lightspeedapp.com/auth/oauth/token", data=payload
+        )
+        response.raise_for_status()
+        return response.json()
 
     def _handle_ratelimits(self, res):
         # Lightspeed R Series uses a leaky bucket algorithm to throttle API calls. Manage it here.
@@ -783,14 +928,14 @@ class RSeriesConnection(OAuthConnection):
                 (float(x)) for x in res.headers["X-LS-API-Bucket-Level"].split("/")
             ]
 
-            logging.debug(
+            logger.debug(
                 f"{self}: HANDLE RATELIMITS: Used {api_bucket_level} of {api_bucket_size} , refreshing at {api_drip_rate} and {time.time() - self.expires} sec. left on token."
             )
 
             if (
                 api_bucket_size < api_bucket_level + 10
             ):  # R-Series counts the largest requests as 10, so need to always have 10 available to avoid a 429
-                logging.info(
+                logger.info(
                     f"{self}: HANDLE RATELIMITS:: Bucket is almost full, taking a break."
                 )
                 sleep(10)
@@ -798,7 +943,7 @@ class RSeriesConnection(OAuthConnection):
             if (
                 time.time() >= self.expires
             ):  # This should never happen because we are checking it before we make the request, but just in case. Probably remove this later
-                logging.debug(f"{self}: HANDLE RATELIMITS: Token needs a refresh")
+                logger.debug(f"{self}: HANDLE RATELIMITS: Token needs a refresh")
                 sleep(2)  # Make sure lightspeed has timed out
                 self._manage_token_refresh()
         return
@@ -889,41 +1034,48 @@ class RSeriesConnection(OAuthConnection):
 
 
 class CSeriesConnection(Connection):
-    def _handle_result(self, res) -> list:
-        """Returns a list of dicts, and None if there is no result."""
+    def _handle_result(self, res):
+        """Returns a list, dict, or raw response depending on the endpoint.
+
+        Most C-Series endpoints wrap their payload under a resource key, e.g.
+        ``{"brand": {...}}`` or ``{"brands": [...]}``.  This method strips that
+        outer key and returns the inner value.
+
+        *Scalar* responses such as the ``/count`` endpoint  (``{"count": 42}``)
+        are returned as-is (the full dict) so that callers like
+        ``CountableApiResource.count()`` can do ``response["count"]`` correctly.
+        """
         orig_result = res.json()
         try:
-            # 1) In eCom it is under the resource type {'brand': {'id': 2734938, 'createdAt':  or {'product': {'id': 58526124, 'createdAt': '2023-07-23T17:32:52+00:00', 'updatedAt': '2023-07-23T17:51:13+00:00', 'isVisible': True, 'visibility': 'auto', 'hasMatrix': False, 'data01': '91 pts', 'data02': '', 'data03': '', ...}}
-            #  Searches with no results return: {'products': []}
-            # This strips off whatever is the name resulting object and return the dict so that Mapping can convert it to a resource object.
-            # Cseries returns the singular form of the resource name in the response (not the pluralized name from the endpoint). So resetting resource to the singular name by pulling it from the response
+            # Strip the outer resource key that C-Series wraps all payloads in.
             self.resource = list(orig_result.keys())[0]
-            # and then pull the actual result from the response
             result = orig_result[self.resource]
 
-            # per our new standard, if there is no result return an empty list
+            # Scalar value (e.g. count endpoint returns {"count": 42}).
+            # Return the full dict so callers can access the key by name.
+            if not isinstance(result, (dict, list)):
+                return orig_result
+
+            # Empty collection
             if len(result) == 0:
                 self.json = {}
-                result = []
-            # If the original call was a get or update, return the result as one dict (which will be converted later to an object), but if it was list(), or list_all() return a list of dicts (which will be converted to a list of objects)
+                return []
+
+            # Single object returned as a dict
+            if isinstance(result, dict):
+                result["json"] = orig_result[self.resource]
             else:
-                # If the original call was a .get() or .update() return the result as one dict (which will be converted later to an object), but if it was list(), or list_all() return a list of one dict (which will be converted to a list of one object)
-                # PROBABLY BREAKING SOMETHING HERE - C-Series probably doesn't know the difference between a get and a list so may cause issues
-                if isinstance(result, dict):
-                    result["json"] = orig_result[self.resource]
-                else:
-                    # Loop through the results and add the raw json to each item, which will be converted to a property later
-                    for new_item, source_item in zip(
-                        result, orig_result[self.resource]
-                    ):
-                        new_item["json"] = source_item
+                # List of objects — attach raw json to each item
+                for new_item, source_item in zip(result, orig_result[self.resource]):
+                    new_item["json"] = source_item
 
             return result
 
         except Exception as e:  # json might be invalid, or store might be down
-            e.__doc__ += (
-                " (_handle_response failed to decode JSON: " + str(res.content) + ")"
+            e.__doc__ = (e.__doc__ or "") + (
+                " (_handle_result failed to decode JSON: " + str(res.content) + ")"
             )
+            raise
 
 
 class XSeriesPersonalConnection(Connection):
@@ -1057,75 +1209,229 @@ class XSeriesPersonalConnection(Connection):
 
 
 class XSeriesOauthConnection(XSeriesPersonalConnection):
-    """
-    Makes a connection to the Lightspeed X-Series API with Oauth
-    XSeries as several differences from the eCom API including:
-        - Supports both a personal token and an Oauth token
-        - Requires a different endpoint including version number
-        - Only supports JSON
-        - Has a different rate limiting algorithm which is used on both personal and Oauth tokens
-        - Expects a different header including a User Agent
+    """Connection for the Lightspeed Retail X-Series API using OAuth 2.0.
 
+    Differs from :class:`XSeriesPersonalConnection` in that:
+
+    * Credentials are stored and refreshed automatically via a :class:`TokenStore`.
+    * The API host is derived from the ``domain_prefix`` embedded in the token
+      (returned by the X-Series OAuth endpoint) so you don't need to supply it
+      separately.
+    * If no valid token is present a :class:`MissingTokenError` is raised — use
+      :meth:`get_authorization_url` and :meth:`exchange_code_for_token` to perform
+      the one-time setup, then persist the token dict via a :class:`TokenStore`.
+
+    X-Series OAuth documentation:
+    https://x-series-api.lightspeedhq.com/docs/authorization
     """
 
-    def __init__(self, host, auth, api_path="/api/{}{}", format=""):
-        self.host = host
+    _API_SERVICE = "retail.lightspeed.app"
+
+    def __init__(
+        self,
+        client_id: str,
+        client_secret: str,
+        token_store: TokenStore,
+        api_path: str = "/api/{}/{}",
+        format: str = "",
+    ):
+        self.client_id = client_id
+        self.client_secret = client_secret
+        self._token_store = token_store
+
         self.api_path = api_path
-        # Lightspeed will return json or xml depending on extension. For simplicity, defining it at the object not method.
+        self.api_version = "2.0"
         self.format = format
 
         self.response = None
         self.request_counter = 0
         self.resource = ""
 
-        self.timeout = 7.0  # need to catch timeout?
+        self.page_min = 0
+        self.page_max = 0
+        self.has_next = False
+        self.last_seen = ""
 
-        logger.info("API Host: %s/%s" % (self.host, self.api_path))
+        self.timeout = 7.0
 
-        # Set up the Session using requests library and let the Session hold the auth and headers. See: https://2.python-requests.org/projects/3/user/advanced/#session-objects
+        # Populated from token data by _manage_token_refresh()
+        self.domain_prefix: str | None = None
+        self.host: str | None = None
+        self.access_token: str = ""
+        self.expires: float = 0.0
+
         self._session = requests.Session()
         self._session.auth = None
-
-        # Leaving this in case header changes are needed later, but LSeCom needs no special header
         self._session.headers = {
-            "User-Agent": f"pyLightspeed/{self.host}",
             "Accept": "application/json",
-            "authorization": f"Bearer {auth}",
         }
-        # Not sure why there is a second copy of the headers, but it is used in the make_request method
-        # self.headers = {"User-Agent": f"pyLightspeed/{self.host}", "Accept": "application/json", "authorization": f"Bearer {auth}"}
+        self._last_response = None
 
-        self._last_response = None  # for debugging
+        self._manage_token_refresh()
 
-    def full_path(self, url):
-        # X Series requires a version number in the path and no extension
-        # i.e. https://domain_prefix.vendhq.com/api/2.0/products
+    # -- Path -------------------------------------------------------------------
+
+    def full_path(self, url: str) -> str:
+        if not self.host:
+            raise MissingTokenError(
+                "No host available. Call _manage_token_refresh() first."
+            )
+        if url.startswith("api/"):
+            return "https://" + self.host + "/" + url
         return "https://" + self.host + self.api_path.format(self.api_version, url)
 
-    def _handle_response(self, url, res, suppress_empty=True):
-        """
-        Handles XSeries specific json formats of responses, standardizing them for the Mapping class
-        """
-        result = Connection._handle_response(self, url, res, suppress_empty)
-        # Main handling of the response will have already failed if there is an error, so we can assume it is good
-        # X-Series returns json like {'includes': None, 'data': {'id': '7eb310ba-...
-        # So pull out only the data key
-        try:
-            if "includes" in res.json():
-                self.includes = res.json()["includes"]
-            if "version" in res.json():
-                self.page_min = res.json()["version"]["min"]
-                self.page_max = res.json()["version"]["max"]
-            if "data" in res.json():
-                result = res.json()["data"]
+    # -- Token management -------------------------------------------------------
 
-        except Exception as e:  # json might be invalid, or store might be down
-            e.message += (
-                " (_handle_response failed to decode JSON: " + str(res.content) + ")"
+    def _token_endpoint(self) -> str:
+        if not self.domain_prefix:
+            raise MissingTokenError(
+                "domain_prefix is not set. Token must be loaded before making requests."
             )
-            raise  # TODO better exception
+        return f"https://{self.domain_prefix}.{self._API_SERVICE}/api/1.0/token"
 
-        return result
+    def _manage_token_refresh(self) -> None:
+        """Load token from store, refresh if expired, update session headers.
+
+        X-Series uses an absolute ``expires`` Unix timestamp (not ``expires_in``).
+        Raises :class:`MissingTokenError` when no valid token is available.
+        """
+        codes = self._token_store.load()
+
+        if codes is None or "refresh_token" not in codes:
+            raise MissingTokenError(
+                f"No valid X-Series token found in {self._token_store!r}. "
+                "Run the OAuth setup flow: call XSeriesOauthConnection.get_authorization_url() "
+                "to generate the authorization URL, direct a retailer to it, then pass the "
+                "returned code and domain_prefix to XSeriesOauthConnection.exchange_code_for_token() "
+                "and save the result to your token store."
+            )
+
+        if codes.get("error"):
+            raise MissingTokenError(
+                f"Token store contains an error entry: {codes['error']}. "
+                "Re-run the OAuth setup flow."
+            )
+
+        self.domain_prefix = codes.get("domain_prefix")
+        self.host = f"{self.domain_prefix}.{self._API_SERVICE}"
+
+        # X-Series returns the absolute expiry as `expires` (Unix timestamp).
+        # Refresh if within 60 seconds of expiry.
+        token_expires = float(codes.get("expires", 0))
+        if time.time() < token_expires - 60:
+            self.access_token = codes["access_token"]
+            self.expires = token_expires
+            self._session.headers["User-Agent"] = f"pyLightspeed/{self.host}"
+            self._session.headers["authorization"] = f"Bearer {self.access_token}"
+            logger.debug(
+                f"X-Series token still valid for {token_expires - time.time():.0f}s"
+            )
+            return
+
+        logger.info(f"XSeriesOauthConnection({self.host}): TOKEN REFRESH…")
+        payload = {
+            "refresh_token": codes["refresh_token"],
+            "client_id": self.client_id,
+            "client_secret": self.client_secret,
+            "grant_type": "refresh_token",
+        }
+        response = requests.post(self._token_endpoint(), data=payload)
+        response.raise_for_status()
+        new_codes = response.json()
+
+        # Update in-memory state
+        self.domain_prefix = new_codes.get("domain_prefix", self.domain_prefix)
+        self.host = f"{self.domain_prefix}.{self._API_SERVICE}"
+        self.access_token = new_codes["access_token"]
+        self.expires = float(new_codes["expires"])
+
+        self._token_store.save(new_codes)
+        self._session.headers["User-Agent"] = f"pyLightspeed/{self.host}"
+        self._session.headers["authorization"] = f"Bearer {self.access_token}"
+        logger.info(f"XSeriesOauthConnection({self.host}): TOKEN REFRESH COMPLETE.")
+
+    # -- One-time OAuth setup helpers -------------------------------------------
+
+    @staticmethod
+    def get_authorization_url(
+        client_id: str,
+        scope: str,
+        redirect_uri: str,
+        state: str,
+    ) -> str:
+        """Build the X-Series OAuth authorization URL.
+
+        Redirect or link a retailer to this URL so they can authorize your
+        application. Once approved, Lightspeed will redirect to *redirect_uri*
+        with ``code``, ``domain_prefix``, ``state``, and ``scope`` query params.
+
+        Args:
+            client_id (str): Your application's client ID.
+            scope (str): Space-separated list of access scopes.
+            redirect_uri (str): Must match the redirect URI registered for your
+                OAuth client.
+            state (str): Required CSRF token — must be at least 8 characters.
+                Generate one per request with e.g. ``secrets.token_urlsafe(12)``.
+
+        Returns:
+            str: The full authorization URL string.
+        """
+        from urllib.parse import urlencode as _urlencode
+
+        params = {
+            "response_type": "code",
+            "client_id": client_id,
+            "redirect_uri": redirect_uri,
+            "state": state,
+            "scope": scope,
+        }
+        return f"https://secure.retail.lightspeed.app/connect?{_urlencode(params)}"
+
+    @staticmethod
+    def exchange_code_for_token(
+        client_id: str,
+        client_secret: str,
+        code: str,
+        redirect_uri: str,
+        domain_prefix: str,
+    ) -> dict:
+        """Exchange a temporary authorization code for OAuth tokens.
+
+        Call this once you receive the ``code`` and ``domain_prefix`` at your
+        redirect URI. Save the returned dict to a `TokenStore`.
+
+        Args:
+            client_id (str): Your application's client ID.
+            client_secret (str): Your application's client secret.
+            code (str): The short-lived authorization code from the OAuth callback.
+            redirect_uri (str): The same redirect URI used in `get_authorization_url`.
+            domain_prefix (str): The retailer's domain prefix as returned in the
+                OAuth callback (e.g. ``"mystore"`` for
+                ``mystore.retail.lightspeed.app``).
+
+        Returns:
+            dict: Token dict containing ``access_token``, ``refresh_token``,
+                ``expires`` (absolute Unix timestamp), ``expires_in``,
+                ``domain_prefix``, and ``scope``.
+
+        Raises:
+            requests.HTTPError: If the token endpoint returns an error.
+        """
+        token_url = (
+            f"https://{domain_prefix}.retail.lightspeed.app/api/1.0/token"
+        )
+        payload = {
+            "code": code,
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "grant_type": "authorization_code",
+            "redirect_uri": redirect_uri,
+        }
+        response = requests.post(token_url, data=payload)
+        response.raise_for_status()
+        return response.json()
+
+
 
 
 class ESeriesConnection(Connection):
