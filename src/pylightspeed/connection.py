@@ -787,6 +787,25 @@ class RSeriesConnection(OAuthConnection):
                 "Re-run the OAuth setup flow."
             )
 
+        # If the stored token is still valid, reuse it without hitting the network.
+        # self.expires starts at 0 on every new object, so we must check the saved
+        # last_run+expires_in rather than self.expires alone — otherwise every new
+        # connection instance would refresh the token and trigger rate-limit errors.
+        token_expires_at = codes.get("last_run", 0) + codes.get("expires_in", 0)
+        if time.time() < token_expires_at - 60:  # 60-second safety buffer
+            self.access_token = codes["access_token"]
+            self.token_type = codes.get("token_type", "Bearer")
+            self.scope = codes.get("scope", self.scope)
+            self.expires_in = codes.get("expires_in", 3600)
+            self.expires = token_expires_at
+            self.refresh_token = codes["refresh_token"]
+            self._session.headers["authorization"] = f"Bearer {self.access_token}"
+            logger.info(
+                f"{self}: Token still valid for {token_expires_at - time.time():.0f}s"
+                " — skipping refresh."
+            )
+            return
+
         payload = {
             "refresh_token": codes["refresh_token"],
             "client_secret": self.client_secret,
