@@ -73,3 +73,14 @@ class RedirectionException(HttpException):
 
 class NotLoggedInException(Exception):
     pass
+
+
+class MissingTokenError(Exception):
+    """Raised when no valid OAuth token is available and automatic acquisition is not possible.
+
+    Typically raised by a Connection's ``_manage_token_refresh()`` when the token store is
+    empty or the stored token is corrupt.  Callers should use the connection's
+    ``get_authorization_url()`` / ``exchange_code_for_token()`` helpers (or a CLI setup
+    script) to obtain an initial token and persist it via a :class:`TokenStore`.
+    """
+    pass

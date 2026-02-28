@@ -1,0 +1,76 @@
+site_name: pyLightspeed
+site_description: Python client for the Lightspeed POS and eCom APIs (R-Series, C-Series, X-Series, E-Series)
+site_author: Wine Foundry
+repo_url: https://github.com/EvilConsultant/pyLightspeed
+repo_name: EvilConsultant/pyLightspeed
+
+theme:
+  name: material
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: deep purple
+      accent: purple
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: deep purple
+      accent: purple
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [src]
+          options:
+            docstring_style: google
+            show_source: true
+            show_root_heading: true
+            show_root_full_path: false
+            show_signature_annotations: true
+            members_order: source
+            separate_signature: true
+            merge_init_into_class: true
+            show_submodules: false
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.tabbed:
+      alternate_style: true
+  - tables
+  - footnotes
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Usage: usage.md
+  - Connections: connection.md
+  - Adding Resources: adding-resources.md
+  - Testing: testing.md
+  - API Reference:
+      - Overview: api.md
+      - api: reference/api.md
+      - connection: reference/connection.md
+      - exceptions: reference/exceptions.md
+      - store: reference/store.md
+      - resources/base: reference/resources/base.md

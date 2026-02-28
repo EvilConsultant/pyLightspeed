@@ -8,10 +8,18 @@ import os
 
 
 class LightspeedStore(object):
-    """An object to hold information about the store you are connecting to make it easier to use pyLightspeed with multiple stores.
-    PARAMETERS:
-    keyfile: A path to a JSON file that contains the api connection parameters and data.
-    codefile: A path for the JSON file that will hold the refresh token. Defaults to codes.json"""
+    """Holds connection parameters for one Lightspeed store.
+
+    A convenience wrapper that makes it easier to use pyLightspeed with multiple
+    stores or clients. You can skip this class entirely and pass credentials
+    directly to the API constructors.
+
+    Args:
+        keyfile (str): Path to a JSON file containing the API connection parameters
+            and credential values.
+        codefile (str): Path for the JSON file that will hold the OAuth refresh
+            token. Defaults to ``\"codes.json\"``.
+    """
 
     def __init__(self, keyfile, codefile="codes.json"):
         with open(keyfile) as f:
