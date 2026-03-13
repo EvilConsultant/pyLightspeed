@@ -65,6 +65,7 @@ nav:
   - Home: index.md
   - Usage: usage.md
   - Connections: connection.md
+  - Token Management: token-management.md
   - Adding Resources: adding-resources.md
   - Testing: testing.md
   - API Reference:

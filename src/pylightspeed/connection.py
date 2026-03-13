@@ -20,12 +20,14 @@ Note:
 """
 
 from abc import ABC, abstractmethod
+from contextlib import contextmanager
 from decimal import Decimal
 import base64
 import hashlib
 import os
 import secrets
 import tempfile
+import threading
 
 try:
     from urllib import urlencode
@@ -37,7 +39,7 @@ import json
 import time
 from time import sleep
 
-from .exception import *
+from .exceptions import *
 
 from loguru import logger
 logger = logger.bind(module="pylightspeed.connection")
@@ -56,26 +58,267 @@ class DecimalEncoder(json.JSONEncoder):
 
 
 # ---------------------------------------------------------------------------
+# Cross-process token refresh locking
+# ---------------------------------------------------------------------------
+# Per lock-path threading.Locks — created lazily, never released (cheap).
+_process_locks: dict[str, threading.Lock] = {}
+_process_lock_meta = threading.Lock()
+
+
+@contextmanager
+def _file_lock(lock_path: str, timeout: float = 30.0, stale_after: float = 60.0):
+    """Exclusive cross-process lock backed by a lock file.
+
+    Also acquires a per-path :class:`~threading.Lock` so threads within the
+    same process queue up rather than racing each other.
+
+    The lock file is created atomically with ``os.O_CREAT | os.O_EXCL`` —
+    atomic on both Linux and Windows.  If the file already exists and is
+    older than *stale_after* seconds (the holder process crashed), it is
+    removed and the attempt retried.  Polls every 100 ms until *timeout*
+    seconds have elapsed, then raises :exc:`TimeoutError`.
+    """
+    with _process_lock_meta:
+        if lock_path not in _process_locks:
+            _process_locks[lock_path] = threading.Lock()
+    thread_lock = _process_locks[lock_path]
+
+    with thread_lock:  # serialises threads within this process
+        deadline = time.time() + timeout
+        while True:
+            try:
+                fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                try:
+                    os.write(fd, str(os.getpid()).encode())
+                finally:
+                    os.close(fd)
+                break  # lock acquired
+            except FileExistsError:
+                try:
+                    if time.time() - os.path.getmtime(lock_path) > stale_after:
+                        os.unlink(lock_path)
+                        continue  # retry immediately
+                except OSError:
+                    pass
+                if time.time() >= deadline:
+                    raise TimeoutError(
+                        f"Could not acquire token refresh lock at {lock_path!r} "
+                        f"within {timeout:.0f}s. If a .lock file remains from a "
+                        f"crashed process, delete it manually."
+                    )
+                time.sleep(0.1)
+        try:
+            yield
+        finally:
+            try:
+                os.unlink(lock_path)
+            except OSError:
+                pass
+
+
+# ---------------------------------------------------------------------------
+# Token Refresh Locking
+# ---------------------------------------------------------------------------
+
+class TokenLock(ABC):
+    """Protocol for exclusive token refresh coordination.
+
+    Implement :meth:`acquire` as a context manager that ensures only one
+    caller at a time can check-and-refresh a token, regardless of how many
+    threads or processes make the attempt simultaneously.
+
+    Built-in implementations:
+
+    * :class:`FileLock` — cross-process lock via ``O_CREAT|O_EXCL`` on a
+      temp file.  Works on a single machine; default for all
+      :class:`TokenStore` instances.
+    * :class:`NullLock` — no-op; use when external infrastructure already
+      guarantees single-writer access (e.g. a Hatchet workflow with
+      ``concurrencyLimit=1``, or in tests).
+    * :class:`VaultCASLock` — distributed lock backed by a dedicated Vault
+      KV v2 key.  Used automatically by :class:`VaultTokenStore` so that
+      any number of processes on any number of machines serialise token
+      refresh correctly.
+    """
+
+    @abstractmethod
+    @contextmanager
+    def acquire(self, key: str, timeout: float = 30.0, stale_after: float = 60.0):
+        """Acquire exclusive access keyed on *key*, yield, then release."""
+        ...  # pragma: no cover
+
+
+class FileLock(TokenLock):
+    """Cross-process lock backed by a temp file.
+
+    Uses ``os.O_CREAT | os.O_EXCL`` for atomic creation on both Linux and
+    Windows.  Also acquires a per-path :class:`~threading.Lock` to serialise
+    threads within the same process without redundant filesystem round-trips.
+    Polls every 100 ms; files older than *stale_after* seconds (holder
+    crashed) are removed automatically.
+    """
+
+    @contextmanager
+    def acquire(self, key: str, timeout: float = 30.0, stale_after: float = 60.0):
+        lock_name = hashlib.sha1(key.encode()).hexdigest()[:16]
+        lock_path = os.path.join(
+            tempfile.gettempdir(), f"pylightspeed_{lock_name}.lock"
+        )
+        with _file_lock(lock_path, timeout=timeout, stale_after=stale_after):
+            yield
+
+
+class NullLock(TokenLock):
+    """No-op lock — provides no mutual exclusion.
+
+    Use when surrounding infrastructure already guarantees single-writer
+    semantics, or in unit tests where only one process runs.
+    """
+
+    @contextmanager
+    def acquire(self, key: str, **kwargs):
+        yield
+
+
+# ---------------------------------------------------------------------------
 # Token Storage
 # ---------------------------------------------------------------------------
 
 class TokenStore(ABC):
     """Abstract base class for OAuth token persistence.
 
-    Implement :meth:`load` and :meth:`save` to use an alternative storage
-    backend (database, secrets manager, environment variables, etc.).
-    The built-in :class:`FileTokenStore` persists tokens to a local JSON file.
+    Implement :meth:`load` and :meth:`save` to persist and retrieve the
+    rotating OAuth token.  Optionally implement :meth:`load_credentials` so
+    that the API classes can pull static connection parameters (client ID,
+    client secret, account ID, etc.) from the same backend, allowing a single
+    store object to be the sole configuration source.
+
+    Standard credential key names (used consistently across all built-in
+    store implementations and the ``LightspeedXxxApi`` constructors):
+
+    +----------------------+----------------------------------+
+    | Key                  | Used for                         |
+    +======================+==================================+
+    | ``LSR_CLIENT_ID``    | R-Series OAuth client ID         |
+    | ``LSR_CLIENT_SECRET``| R-Series OAuth client secret     |
+    | ``LSR_ACCOUNT_ID``   | R-Series account / store ID      |
+    | ``LSR_REDIRECT_URI`` | R-Series OAuth redirect URI      |
+    | ``LSC_API_KEY``      | C-Series API key                 |
+    | ``LSC_API_SECRET``   | C-Series API secret              |
+    | ``LSX_DOMAIN_PREFIX``| X-Series domain prefix           |
+    | ``LSX_PERSONAL_TOKEN``| X-Series personal access token  |
+    +----------------------+----------------------------------+
+
+    These names intentionally match the conventional ``.env`` variable names
+    so that switching between file, MySQL, or Vault storage requires no
+    credential renaming.
     """
 
     @abstractmethod
-    def load(self) -> dict | None:
+    def load_token(self) -> dict | None:
         """Return the stored token dict, or *None* if no token has been saved yet."""
         ...
 
     @abstractmethod
-    def save(self, token_data: dict) -> None:
-        """Persist *token_data* so it can be retrieved by a subsequent :meth:`load`."""
+    def save_token(self, token_data: dict) -> None:
+        """Persist *token_data* so it can be retrieved by a subsequent :meth:`load_token`."""
         ...
+
+    def load_credentials(self) -> dict | None:
+        """Return static connection credentials, or *None* if this store does not
+        manage them.
+
+        The returned dict should use the standard key names documented on
+        :class:`TokenStore` (e.g. ``LSR_CLIENT_ID``, ``LSR_CLIENT_SECRET``).
+        The ``LightspeedXxxApi`` constructors call this automatically when a
+        *token_store* is provided; explicit constructor args always take
+        precedence over values returned here.
+
+        The default implementation returns *None* — override in subclasses
+        that back static credentials.
+        """
+        return None
+
+    @property
+    def _lock(self) -> 'TokenLock':
+        """The :class:`TokenLock` used to serialise token refresh calls.
+
+        Defaults to :class:`FileLock` (cross-process on a single machine).
+        Set ``self._lock = <lock>`` in a subclass ``__init__`` to install a
+        different backend — e.g. :class:`VaultCASLock` for multi-machine
+        deployments, or :class:`NullLock` when locking is handled elsewhere.
+        """
+        try:
+            return self.__lock
+        except AttributeError:
+            self.__lock = FileLock()
+            return self.__lock
+
+    @_lock.setter
+    def _lock(self, value: 'TokenLock') -> None:
+        self.__lock = value
+
+    def _lock_key(self) -> str:
+        """Stable string that uniquely identifies this token's storage location.
+
+        Passed as *key* to :meth:`TokenLock.acquire` so that all instances
+        pointing at the same store share the same lock and serialise across
+        processes.  Subclasses with a persistent identity (file path, Vault
+        path, DB row key) should override this.
+
+        The default uses class name + ``id(self)``, which only serialises
+        threads within a single process — sufficient for stores with no
+        stable cross-process identity (e.g. :class:`EnvTokenStore`).
+        """
+        return f"{self.__class__.__name__}_{id(self)}"
+
+    def atomic_refresh(
+        self,
+        do_refresh_fn,
+        expiry_buffer: int = 60,
+    ) -> tuple[dict, bool]:
+        """Refresh the token exactly once across all threads and processes.
+
+        Acquires an exclusive lock via :attr:`_lock` (a :class:`TokenLock`),
+        re-reads the token *under the lock*, and only calls *do_refresh_fn*
+        if the token is still stale.  Any concurrent caller that waited for
+        the lock will find the token already fresh on its re-read and return
+        without calling the OAuth API — so the provider is called at most once
+        regardless of how many processes race.
+
+        The default lock is :class:`FileLock` (single machine).
+        :class:`VaultTokenStore` installs a :class:`VaultCASLock` that
+        extends this guarantee across any number of machines.
+
+        Args:
+            do_refresh_fn: ``(codes: dict) -> new_token_data: dict`` —
+                exchanges the stored refresh token with the OAuth provider.
+            expiry_buffer: Seconds before true expiry to treat as expired
+                (default 60).
+
+        Returns:
+            ``(token_data, was_refreshed)`` — *was_refreshed* is ``True``
+            only when this process called the OAuth API and saved the result.
+        """
+        with self._lock.acquire(self._lock_key()):
+            # Re-read under the lock — a concurrent caller may have already
+            # refreshed while we were waiting.
+            codes = self.load_token()
+            if codes is None:
+                raise MissingTokenError(
+                    f"No token found in {self!r}. Run the OAuth setup flow."
+                )
+            token_expires_at = codes.get("last_run", 0) + codes.get("expires_in", 0)
+            if time.time() < token_expires_at - expiry_buffer:
+                logger.debug(
+                    f"atomic_refresh: token in {self!r} already fresh "
+                    f"({token_expires_at - time.time():.0f}s remaining) — "
+                    "another process already refreshed."
+                )
+                return codes, False
+            new_token_data = do_refresh_fn(codes)
+            self.save_token(new_token_data)
+            return new_token_data, True
 
 
 class FileTokenStore(TokenStore):
@@ -84,21 +327,32 @@ class FileTokenStore(TokenStore):
     Atomic writes (write to a temp file, then `os.replace`) prevent
     credential-file corruption if the process is interrupted mid-write.
 
+    Optionally accepts a separate *credentials_file* so that static
+    connection parameters (client ID, secret, account ID, etc.) can be
+    co-located with the token store rather than scattered across ``.env``
+    variables or hard-coded constructor arguments. The credentials file is
+    never modified by :meth:`save` — only the token file is written.
+
     Args:
         path (str): Absolute or relative path to the token JSON file.
+        credentials_file (str | None): Path to a JSON file containing static
+            credentials keyed by the standard names (``LSR_CLIENT_ID``,
+            ``LSR_CLIENT_SECRET``, etc.; see :class:`TokenStore`). When
+            provided, :meth:`load_credentials` reads and returns that file.
     """
 
-    def __init__(self, path: str):
+    def __init__(self, path: str, credentials_file: str | None = None):
         self.path = path
+        self.credentials_file = credentials_file
 
-    def load(self) -> dict | None:
+    def load_token(self) -> dict | None:
         try:
             with open(self.path, "r") as f:
                 return json.load(f)
         except FileNotFoundError:
             return None
 
-    def save(self, token_data: dict) -> None:
+    def save_token(self, token_data: dict) -> None:
         dir_ = os.path.dirname(os.path.abspath(self.path))
         fd, tmp_path = tempfile.mkstemp(dir=dir_, suffix=".tmp")
         try:
@@ -112,28 +366,40 @@ class FileTokenStore(TokenStore):
                 pass
             raise
 
+    def load_credentials(self) -> dict | None:
+        """Return credentials from *credentials_file*, or *None* if not configured."""
+        if self.credentials_file is None:
+            return None
+        try:
+            with open(self.credentials_file, "r") as f:
+                return json.load(f)
+        except FileNotFoundError:
+            return None
+
     def __repr__(self) -> str:
+        if self.credentials_file:
+            return f"FileTokenStore(path={self.path!r}, credentials_file={self.credentials_file!r})"
         return f"FileTokenStore(path={self.path!r})"
+
+    def _lock_key(self) -> str:
+        return os.path.abspath(self.path)
 
 
 class MySQLTokenStore(TokenStore):
-    """Stores OAuth tokens in a MySQL ``stores.config`` JSON column.
+    """Base class for storing OAuth tokens in a MySQL database via SQLAlchemy.
 
-    The token dict is persisted as the value of *config_key* inside the
-    ``config`` JSON column on the row identified by *store_id*.  All other
-    keys in ``config`` are preserved — only the token key is touched.
+    Handles connection management only.  Subclass this and implement
+    :meth:`load` and :meth:`save` to match your own table structure.
 
-    This lets all apps (bottleadmin, bottlemover, etc.) share a single token
-    that auto-refreshes in place without any file-system coordination.
+    All database operations use SQLAlchemy Core with the
+    ``mysql+mysqlconnector`` dialect so no separate DB-API driver import is
+    needed beyond what SQLAlchemy already expects.
 
     Connection parameters default to the standard ``MYSQL_*`` environment
-    variables used throughout the bottle- ecosystem, so no additional
-    configuration is needed when running inside those apps.
+    variables, so no extra configuration is needed when running inside
+    apps that already set those vars.
 
     Args:
-        store_id (int): The ``stores.id`` value whose config holds the token.
-        config_key (str): JSON key within ``stores.config`` to store the token
-            under.  Defaults to ``"LSRETAIL_TOKEN"``.
         host (str | None): MySQL host.  Defaults to ``MYSQL_HOST`` env var or
             ``"127.0.0.1"``.
         port (int | None): MySQL port.  Defaults to ``MYSQL_PORT`` env var or
@@ -146,91 +412,602 @@ class MySQLTokenStore(TokenStore):
             env var or ``"bottleadmin"``.
 
     Requires:
-        ``pymysql`` — install with ``pip install pylightspeed[mysql]``.
+        ``sqlalchemy`` and ``mysql-connector-python`` — install with
+        ``uv add 'pylightspeed[mysql]'``.
     """
 
     def __init__(
         self,
-        store_id: int,
-        config_key: str = "LSRETAIL_TOKEN",
         host: str | None = None,
         port: int | None = None,
         user: str | None = None,
         password: str | None = None,
         database: str | None = None,
     ):
-        self.store_id = store_id
-        self.config_key = config_key
         self._host = host or os.getenv("MYSQL_HOST", "127.0.0.1")
         self._port = int(port or os.getenv("MYSQL_PORT", "3306"))
         self._user = user or os.getenv("MYSQL_USER", "root")
         self._password = password or os.getenv("MYSQL_PASSWORD", "")
         self._database = database or os.getenv("MYSQL_DB", "bottleadmin")
 
-    def _connect(self):
+    def _engine(self):
         try:
-            import pymysql
-            import pymysql.cursors
+            from sqlalchemy import create_engine
         except ImportError as exc:
             raise ImportError(
-                "MySQLTokenStore requires pymysql. "
-                "Install it with: pip install pylightspeed[mysql]"
+                "MySQLTokenStore requires sqlalchemy and mysql-connector-python. "
+                "Install with: uv add 'pylightspeed[mysql]'"
             ) from exc
-        return pymysql.connect(
-            host=self._host,
-            port=self._port,
-            user=self._user,
-            password=self._password,
-            database=self._database,
-            cursorclass=pymysql.cursors.DictCursor,
+        url = (
+            f"mysql+mysqlconnector://{self._user}:{self._password}"
+            f"@{self._host}:{self._port}/{self._database}"
         )
+        return create_engine(url, pool_pre_ping=True)
 
-    def load(self) -> dict | None:
-        conn = self._connect()
-        try:
-            with conn.cursor() as cur:
-                cur.execute(
-                    f"SELECT JSON_EXTRACT(config, %s) AS token "
-                    f"FROM stores WHERE id = %s",
-                    (f"$.{self.config_key}", self.store_id),
-                )
-                row = cur.fetchone()
-            if row is None:
-                raise RuntimeError(
-                    f"MySQLTokenStore: no stores row for id={self.store_id}"
-                )
-            raw = row["token"]
-            if raw is None:
-                return None
-            # MySQL JSON_EXTRACT returns a string; pymysql may auto-decode it
-            return json.loads(raw) if isinstance(raw, str) else raw
-        finally:
-            conn.close()
+    def load_token(self) -> dict | None:
+        raise NotImplementedError
 
-    def save(self, token_data: dict) -> None:
-        conn = self._connect()
-        try:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "UPDATE stores "
-                    "SET config = JSON_SET(COALESCE(config, '{}'), %s, CAST(%s AS JSON)) "
-                    "WHERE id = %s",
-                    (
-                        f"$.{self.config_key}",
-                        json.dumps(token_data),
-                        self.store_id,
-                    ),
-                )
-            conn.commit()
-        finally:
-            conn.close()
+    def save_token(self, token_data: dict) -> None:
+        raise NotImplementedError
 
     def __repr__(self) -> str:
         return (
-            f"MySQLTokenStore(store_id={self.store_id!r}, "
+            f"{self.__class__.__name__}("
+            f"db={self._database!r}@{self._host}:{self._port})"
+        )
+
+
+class StoresTableTokenStore(MySQLTokenStore):
+    """Stores OAuth tokens in a JSON column on a ``stores`` table.
+
+    This is an example MySQL token store implementation — adapt it to your own
+    schema or use it as-is if your database has a ``stores`` table with an
+    ``id`` primary key and a ``config`` JSON column.
+
+    The token dict is persisted as the value of *config_key* inside the
+    ``config`` JSON column on the row identified by *store_id*.  All other
+    keys in ``config`` are preserved — only the token key is touched.
+
+    This lets multiple apps share a single token that auto-refreshes in place
+    without any file-system coordination.
+
+    Optionally supply *credentials_config_key* to store static connection
+    credentials (``LSR_CLIENT_ID``, ``LSR_CLIENT_SECRET``, etc.) in a
+    *separate* JSON key on the same row.  When set, :meth:`load_credentials`
+    reads and returns that key.
+
+    Args:
+        store_id (int): The ``stores.id`` value whose config holds the token.
+        config_key (str): JSON key within ``stores.config`` to write the token
+            under.  Defaults to ``"LSRETAIL_TOKEN"``.
+        credentials_config_key (str | None): JSON key within ``stores.config``
+            holding static credentials (see :class:`TokenStore` for key names).
+            When *None* (default), :meth:`load_credentials` returns *None*.
+        host (str | None): See :class:`MySQLTokenStore`.
+        port (int | None): See :class:`MySQLTokenStore`.
+        user (str | None): See :class:`MySQLTokenStore`.
+        password (str | None): See :class:`MySQLTokenStore`.
+        database (str | None): See :class:`MySQLTokenStore`.
+    """
+
+    def __init__(
+        self,
+        store_id: int,
+        config_key: str = "LSRETAIL_TOKEN",
+        credentials_config_key: str | None = None,
+        host: str | None = None,
+        port: int | None = None,
+        user: str | None = None,
+        password: str | None = None,
+        database: str | None = None,
+    ):
+        super().__init__(host=host, port=port, user=user, password=password, database=database)
+        self.store_id = store_id
+        self.config_key = config_key
+        self.credentials_config_key = credentials_config_key
+
+    def _read_config_key(self, key: str) -> dict | None:
+        """Read a single JSON key from stores.config for this store_id."""
+        from sqlalchemy import text
+        with self._engine().connect() as conn:
+            row = conn.execute(
+                text("SELECT JSON_EXTRACT(config, :key) AS val FROM stores WHERE id = :id"),
+                {"key": f"$.{key}", "id": self.store_id},
+            ).mappings().fetchone()
+        if row is None:
+            raise RuntimeError(
+                f"StoresTableTokenStore: no stores row for id={self.store_id}"
+            )
+        raw = row["val"]
+        if raw is None:
+            return None
+        return json.loads(raw) if isinstance(raw, str) else raw
+
+    def load_token(self) -> dict | None:
+        return self._read_config_key(self.config_key)
+
+    def save_token(self, token_data: dict) -> None:
+        from sqlalchemy import text
+        with self._engine().begin() as conn:
+            conn.execute(
+                text(
+                    "UPDATE stores "
+                    "SET config = JSON_SET(COALESCE(config, '{}'), :key, CAST(:val AS JSON)) "
+                    "WHERE id = :id"
+                ),
+                {
+                    "key": f"$.{self.config_key}",
+                    "val": json.dumps(token_data),
+                    "id": self.store_id,
+                },
+            )
+
+    def load_credentials(self) -> dict | None:
+        """Return credentials from *credentials_config_key*, or *None* if not configured."""
+        if self.credentials_config_key is None:
+            return None
+        return self._read_config_key(self.credentials_config_key)
+
+    def __repr__(self) -> str:
+        return (
+            f"StoresTableTokenStore(store_id={self.store_id!r}, "
             f"config_key={self.config_key!r}, "
             f"db={self._database!r}@{self._host}:{self._port})"
         )
+
+
+class VaultCASLock(TokenLock):
+    """Distributed lock backed by a dedicated Vault KV v2 key.
+
+    Uses CAS (check-and-set) writes so that the lock acquisition is atomic
+    server-side — exactly one caller across all machines succeeds; all
+    others spin and retry.
+
+    **Algorithm**
+
+    *Acquire*: Read the lock key and its current version.  If the holder
+    field is absent or ``null``, or the entry is older than *stale_after*
+    seconds (the holder crashed), attempt a CAS write with the current
+    version.  If the CAS succeeds ownership is granted.  If it fails
+    (another machine wrote first), poll every 100 ms and retry.
+
+    *Release*: Write ``{"holder": null}`` without CAS — only the holder
+    calls release, so no conflict is possible.
+
+    Args:
+        lock_path: KV v2 path used exclusively as the mutex key.  Must be
+            different from any token or credentials path.  Convention:
+            ``token_path + "_lock"``
+            (e.g. ``"lightspeed/stores/1/token_lock"``).
+        vault_addr: Vault URL.  Defaults to the ``VAULT_ADDR`` env var.
+        vault_token: Vault token.  Defaults to the ``VAULT_TOKEN`` env var.
+        mount_point: KV v2 mount point (default ``"secret"``).
+
+    Requires:
+        ``hvac`` — install with ``uv add 'pylightspeed[vault]'``.
+    """
+
+    def __init__(
+        self,
+        lock_path: str,
+        vault_addr: str | None = None,
+        vault_token: str | None = None,
+        mount_point: str = "secret",
+    ):
+        self.lock_path = lock_path
+        self._vault_addr = vault_addr or os.getenv("VAULT_ADDR")
+        self._vault_token = vault_token or os.getenv("VAULT_TOKEN")
+        self.mount_point = mount_point
+
+    def _client(self):
+        try:
+            import hvac
+        except ImportError as exc:
+            raise ImportError(
+                "VaultCASLock requires hvac. "
+                "Install with: uv add 'pylightspeed[vault]'"
+            ) from exc
+        client = hvac.Client(url=self._vault_addr, token=self._vault_token)
+        if not client.is_authenticated():
+            raise RuntimeError(
+                "VaultCASLock: Vault client is not authenticated. "
+                "Check VAULT_ADDR and VAULT_TOKEN environment variables."
+            )
+        return client
+
+    def _read_with_version(self) -> tuple[dict | None, int]:
+        try:
+            response = self._client().secrets.kv.v2.read_secret_version(
+                path=self.lock_path,
+                mount_point=self.mount_point,
+                raise_on_deleted_version=True,
+            )
+            return response["data"]["data"], response["data"]["metadata"]["version"]
+        except Exception as exc:
+            if "InvalidPath" in type(exc).__name__ or "404" in str(exc):
+                return None, 0
+            raise
+
+    @contextmanager
+    def acquire(self, key: str, timeout: float = 30.0, stale_after: float = 60.0):
+        """Acquire the Vault distributed lock, yield, then release.
+
+        The *key* argument is accepted for protocol compatibility but ignored
+        — :class:`VaultCASLock` uses :attr:`lock_path` as its identity, which
+        is set at construction time.
+
+        Also acquires a per-path :class:`~threading.Lock` first so that
+        threads within the same process serialise without redundant Vault
+        round-trips.
+        """
+        import socket
+
+        # In-process thread serialisation — prevents redundant Vault calls
+        # from concurrent threads within the same process.
+        with _process_lock_meta:
+            if self.lock_path not in _process_locks:
+                _process_locks[self.lock_path] = threading.Lock()
+        thread_lock = _process_locks[self.lock_path]
+
+        with thread_lock:
+            holder_id = f"{os.getpid()}@{socket.gethostname()}"
+            deadline = time.time() + timeout
+
+            while True:
+                data, version = self._read_with_version()
+                is_free = data is None or data.get("holder") is None
+                is_stale = (
+                    not is_free
+                    and time.time() - (data.get("acquired_at") or 0) > stale_after
+                )
+                if is_free or is_stale:
+                    try:
+                        self._client().secrets.kv.v2.create_or_update_secret(
+                            path=self.lock_path,
+                            secret={"holder": holder_id, "acquired_at": time.time()},
+                            mount_point=self.mount_point,
+                            cas=version,
+                        )
+                        break  # acquired
+                    except Exception as exc:
+                        cas_conflict = (
+                            "InvalidRequest" in type(exc).__name__
+                            or "check-and-set" in str(exc).lower()
+                            or "cas" in str(exc).lower()
+                        )
+                        if not cas_conflict:
+                            raise
+                        # Another machine got there first — fall through to retry
+
+                if time.time() >= deadline:
+                    raise TimeoutError(
+                        f"Could not acquire Vault distributed lock at "
+                        f"{self.lock_path!r} within {timeout:.0f}s."
+                    )
+                time.sleep(0.1)
+
+            try:
+                yield
+            finally:
+                try:
+                    self._client().secrets.kv.v2.create_or_update_secret(
+                        path=self.lock_path,
+                        secret={"holder": None},
+                        mount_point=self.mount_point,
+                    )
+                except Exception:
+                    pass  # best-effort; stale detection covers crashes
+
+
+class VaultTokenStore(TokenStore):
+    """Stores OAuth tokens in HashiCorp Vault (KV v2 secrets engine).
+
+    Manages both the rotating OAuth token and, optionally, the static
+    connection credentials (client ID, secret, account ID, etc.) when
+    *credentials_path* is provided.  This allows a single
+    ``VaultTokenStore`` instance to be the complete configuration source
+    for a ``LightspeedXxxApi`` constructor.
+
+    The token is read and written at *token_path* — a single path that
+    owns the full token object (access token, refresh token, expiry).
+
+    Credentials are read-only static config that may be spread across
+    multiple Vault paths.  Pass a list to *credentials_path* and the
+    results are merged left-to-right, so later paths (e.g. store-specific)
+    override earlier ones (e.g. shared).  The merged result is cached
+    after the first call to :meth:`load_credentials`.
+
+    Args:
+        token_path (str): KV v2 path for the OAuth token secret —
+            used for both reading and writing
+            (e.g. ``"lightspeed/stores/2"``).  Required.
+        credentials_path (str | list[str] | None): One path or an ordered
+            list of paths holding static connection credentials keyed by
+            the standard names (e.g.
+            ``["lightspeed/shared", "lightspeed/stores/2"]``).  Paths are
+            merged left-to-right so later entries override earlier ones.
+            When *None*, :meth:`load_credentials` returns *None*.
+        vault_addr (str | None): Vault server URL.  Defaults to the
+            ``VAULT_ADDR`` environment variable.
+        vault_token (str | None): Vault authentication token.  Defaults to
+            the ``VAULT_TOKEN`` environment variable.
+        mount_point (str): KV v2 mount point.  Defaults to ``"secret"``.
+
+    Requires:
+        ``hvac`` — install with ``uv add 'pylightspeed[vault]'``.
+    """
+
+    def __init__(
+        self,
+        token_path: str,
+        credentials_path: str | list[str] | None = None,
+        vault_addr: str | None = None,
+        vault_token: str | None = None,
+        mount_point: str = "secret",
+    ):
+        # Guard: token_path and credentials_path must not overlap — writing a
+        # token to the same Vault path that holds credentials would silently
+        # replace them, since KV v2 create_or_update_secret overwrites the
+        # entire secret.
+        if credentials_path is not None:
+            cred_paths = (
+                [credentials_path]
+                if isinstance(credentials_path, str)
+                else list(credentials_path)
+            )
+            if token_path in cred_paths:
+                raise ValueError(
+                    f"VaultTokenStore: token_path {token_path!r} must not be the same as "
+                    f"any credentials_path entry — saving a token would overwrite your "
+                    f"credentials.  Use separate Vault paths for tokens and credentials "
+                    f"(e.g. 'lightspeed/stores/2/tokens' vs 'lightspeed/stores/2/creds')."
+                )
+
+        self.token_path = token_path
+        self.credentials_path = credentials_path
+        self._vault_addr = vault_addr or os.getenv("VAULT_ADDR")
+        self._vault_token = vault_token or os.getenv("VAULT_TOKEN")
+        self.mount_point = mount_point
+        self._credentials_cache: dict | None = None
+        self._credentials_loaded: bool = False
+        # Install a Vault distributed lock so that any number of processes
+        # on any number of machines serialise token refresh correctly.
+        # A dedicated lock path avoids interfering with the token secret.
+        self._lock = VaultCASLock(
+            lock_path=token_path + "_lock",
+            vault_addr=self._vault_addr,
+            vault_token=self._vault_token,
+            mount_point=mount_point,
+        )
+
+    def _client(self):
+        try:
+            import hvac
+        except ImportError as exc:
+            raise ImportError(
+                "VaultTokenStore requires hvac. "
+                "Install with: uv add 'pylightspeed[vault]'"
+            ) from exc
+        client = hvac.Client(url=self._vault_addr, token=self._vault_token)
+        if not client.is_authenticated():
+            raise RuntimeError(
+                "VaultTokenStore: Vault client is not authenticated. "
+                "Check VAULT_ADDR and VAULT_TOKEN environment variables."
+            )
+        return client
+
+    def _read_path(self, path: str) -> dict | None:
+        """Read a KV v2 secret at *path*, returning its data dict or None."""
+        import hvac.exceptions
+        try:
+            response = self._client().secrets.kv.v2.read_secret_version(
+                path=path,
+                mount_point=self.mount_point,
+                raise_on_deleted_version=True,
+            )
+            return response["data"]["data"]
+        except Exception as exc:
+            # hvac raises InvalidPath when the secret doesn't exist yet
+            if "InvalidPath" in type(exc).__name__ or "404" in str(exc):
+                return None
+            raise
+
+    def _read_path_with_version(self, path: str) -> tuple[dict | None, int]:
+        """Read a KV v2 secret and return ``(data, version)``.
+
+        *version* is 0 when the secret does not exist yet (first write).
+        """
+        try:
+            response = self._client().secrets.kv.v2.read_secret_version(
+                path=path,
+                mount_point=self.mount_point,
+                raise_on_deleted_version=True,
+            )
+            return response["data"]["data"], response["data"]["metadata"]["version"]
+        except Exception as exc:
+            if "InvalidPath" in type(exc).__name__ or "404" in str(exc):
+                return None, 0
+            raise
+
+    def load_token(self) -> dict | None:
+        return self._read_path(self.token_path)
+
+    def save_token(self, token_data: dict) -> None:
+        self._client().secrets.kv.v2.create_or_update_secret(
+            path=self.token_path,
+            secret=token_data,
+            mount_point=self.mount_point,
+        )
+
+    def _lock_key(self) -> str:
+        return f"vault/{self.mount_point}/{self.token_path}"
+
+    def load_credentials(self) -> dict | None:
+        """Return credentials from *credentials_path*, or *None* if not configured.
+
+        The result is cached after the first call — Vault is not queried
+        again within the same process lifetime.
+        """
+        if not self.credentials_path:
+            return None
+        if not self._credentials_loaded:
+            paths = (
+                [self.credentials_path]
+                if isinstance(self.credentials_path, str)
+                else self.credentials_path
+            )
+            merged: dict = {}
+            for p in paths:
+                data = self._read_path(p)
+                if data:
+                    merged.update(data)
+            self._credentials_cache = merged or None
+            self._credentials_loaded = True
+        return self._credentials_cache
+
+    def __repr__(self) -> str:
+        parts = [f"token_path={self.token_path!r}"]
+        if self.credentials_path:
+            parts.append(f"credentials_path={self.credentials_path!r}")
+        parts.append(f"mount_point={self.mount_point!r}")
+        return f"VaultTokenStore({', '.join(parts)})"
+
+
+class EnvTokenStore(TokenStore):
+    """Read-only token store backed by environment variables or an explicit dict.
+
+    Useful as a credentials source in a :class:`CompositeTokenStore` when
+    credentials already live in the process environment (e.g. loaded via
+    ``python-dotenv``) without requiring a dedicated file or remote backend.
+
+    All standard ``LSR_*``, ``LSC_*``, and ``LSX_*`` credential keys that are
+    present in the source are returned by :meth:`load_credentials`.  Keys with
+    empty or missing values are omitted.
+
+    :meth:`load_token` always returns ``None`` — the environment is not a token
+    store.  :meth:`save_token` raises :exc:`NotImplementedError` because the
+    environment is read-only.
+
+    Args:
+        environ (dict | None): Explicit mapping to use instead of
+            ``os.environ``.  Useful in tests or to pass a curated subset of keys.
+    """
+
+    _CREDENTIAL_KEYS: frozenset = frozenset({
+        "LSR_CLIENT_ID", "LSR_CLIENT_SECRET", "LSR_ACCOUNT_ID", "LSR_REDIRECT_URI",
+        "LSC_API_KEY", "LSC_API_SECRET", "LSC_API_HOST", "LSC_API_PATH",
+        "LSX_DOMAIN_PREFIX", "LSX_PERSONAL_TOKEN", "LSX_CLIENT_ID", "LSX_CLIENT_SECRET",
+    })
+
+    def __init__(self, environ: dict | None = None):
+        self._environ = environ  # None → use os.environ at call time
+
+    def load_token(self) -> dict | None:
+        return None
+
+    def save_token(self, token_data: dict) -> None:
+        raise NotImplementedError(
+            "EnvTokenStore is read-only.  "
+            "Use a FileTokenStore, VaultTokenStore, or other writable store for tokens."
+        )
+
+    def load_credentials(self) -> dict | None:
+        source = self._environ if self._environ is not None else os.environ
+        result = {k: v for k in self._CREDENTIAL_KEYS if (v := source.get(k))}
+        return result or None
+
+    def __repr__(self) -> str:
+        if self._environ is not None:
+            return f"EnvTokenStore(keys={sorted(self._environ.keys())!r})"
+        return "EnvTokenStore()"
+
+
+class CompositeTokenStore(TokenStore):
+    """Assembles credentials and token I/O from multiple independent stores.
+
+    This is the primary composition point when credentials and tokens live in
+    different backends, or when you want redundant token writes.
+
+    **Credentials** are loaded from each store in *credentials* and merged
+    left-to-right — later stores override earlier ones.
+
+    **Token reads** are delegated to a single *token_read* store.
+
+    **Token writes** are sent to every store in *token_write*.  Only stores
+    explicitly listed receive the write — there is no implicit broadcasting.
+
+    Args:
+        credentials (TokenStore | list[TokenStore] | None): One or more stores
+            whose :meth:`~TokenStore.load_credentials` results are merged L→R.
+        token_read (TokenStore | None): Store used by :meth:`load_token`.
+            When ``None``, :meth:`load_token` returns ``None``.
+        token_write (TokenStore | list[TokenStore] | None): Store(s) written
+            by :meth:`save_token`.  When ``None`` or empty,
+            :meth:`save_token` raises :exc:`RuntimeError`.
+
+    Example::
+
+        store = CompositeTokenStore(
+            credentials=[EnvTokenStore(), vault_store],
+            token_read=vault_store,
+            token_write=[vault_store, FileTokenStore("/tmp/backup.json")],
+        )
+        api = LightspeedRSeriesApi(token_store=store)
+    """
+
+    def __init__(
+        self,
+        credentials: "TokenStore | list[TokenStore] | None" = None,
+        token_read: "TokenStore | None" = None,
+        token_write: "TokenStore | list[TokenStore] | None" = None,
+    ):
+        if credentials is None:
+            self._credential_stores: list = []
+        elif isinstance(credentials, TokenStore):
+            self._credential_stores = [credentials]
+        else:
+            self._credential_stores = list(credentials)
+
+        self._token_read = token_read
+
+        if token_write is None:
+            self._token_write: list = []
+        elif isinstance(token_write, TokenStore):
+            self._token_write = [token_write]
+        else:
+            self._token_write = list(token_write)
+
+    def load_token(self) -> dict | None:
+        if self._token_read is None:
+            return None
+        return self._token_read.load_token()
+
+    def save_token(self, token_data: dict) -> None:
+        if not self._token_write:
+            raise RuntimeError(
+                "CompositeTokenStore: no token_write store configured.  "
+                "Pass token_write=<store> when constructing CompositeTokenStore."
+            )
+        for store in self._token_write:
+            store.save_token(token_data)
+
+    def load_credentials(self) -> dict | None:
+        merged: dict = {}
+        for store in self._credential_stores:
+            creds = store.load_credentials()
+            if creds:
+                merged.update(creds)
+        return merged or None
+
+    def __repr__(self) -> str:
+        parts = []
+        if self._credential_stores:
+            parts.append(f"credentials={self._credential_stores!r}")
+        if self._token_read is not None:
+            parts.append(f"token_read={self._token_read!r}")
+        if self._token_write:
+            parts.append(f"token_write={self._token_write!r}")
+        return f"CompositeTokenStore({', '.join(parts)})"
 
 
 class Connection(object):
@@ -457,16 +1234,10 @@ class Connection(object):
                         headers=headers,
                         params=params,
                     )
-                elif result.status_code == 429:  # too many requests
-                    sleep(30)
-                    result = self._session.request(
-                        method,
-                        url,
-                        data=data,
-                        timeout=self.timeout,
-                        headers=headers,
-                        params=params,
-                    )
+                elif result.status_code == 429:
+                    # Use the Retry-After header Lightspeed sends; fall back to
+                    # 5s for burst limiter (needs ≥1s) or 30s for leaky bucket.
+                    result = self._retry_after_429(result, method, url, data, headers, params)
 
                 if result.status_code not in [200, 201]:
                     raise requests.exceptions.RequestException(
@@ -558,6 +1329,37 @@ class Connection(object):
         )
         logger.debug(f"POST:Data: {data} \n Headers: {headers} \n Response: {response}")
         return self._handle_response(url, response)
+
+    def _retry_after_429(self, result, method, url, data, headers, params, max_retries: int = 3):
+        """Retry a request that received a 429 Too Many Requests response.
+
+        Uses the ``Retry-After`` header Lightspeed sends with every 429 to
+        determine exactly how long to wait.  Distinguishes the two Lightspeed
+        rate limiters:
+
+        * ``api-burst-limiter`` — 1-second window; ``Retry-After`` is typically
+          1-2 s.
+        * ``api-leaky-bucket`` — bucket exhausted; ``Retry-After`` may be
+          several seconds to minutes.
+
+        Retries up to *max_retries* times.  If all retries return 429, the
+        final response is returned and the caller raises an appropriate error.
+        """
+        for attempt in range(max_retries):
+            limiter_type = result.headers.get("X-LS-API-RateLimit-Type", "api-leaky-bucket")
+            retry_after = float(result.headers.get("Retry-After", 1 if "burst" in limiter_type else 30))
+            logger.warning(
+                f"429 {limiter_type} (attempt {attempt + 1}/{max_retries}) — "
+                f"waiting {retry_after:.1f}s before retry: {url}"
+            )
+            sleep(retry_after)
+            result = self._session.request(
+                method, url, data=data, timeout=self.timeout,
+                headers=headers, params=params,
+            )
+            if result.status_code != 429:
+                break
+        return result
 
     def _manage_token_refresh(self):
         """Monitors token refresh requirements where needed and refreshes the token if needed. This should be overridden by subclasses to handle the specific API type."""
@@ -748,13 +1550,12 @@ class RSeriesConnection(OAuthConnection):
     def _manage_token_refresh(self):
         """Refresh the R-Series access token when expired.
 
-        Reads the refresh token from the token store, exchanges it for a new
-        access token via the Lightspeed OAuth endpoint, then persists the updated
-        token data.
-
-        Raises :class:`MissingTokenError` if the token store contains no valid
-        token.  In that case use :meth:`get_authorization_url` and
-        :meth:`exchange_code_for_token` to bootstrap the OAuth flow.
+        Delegates to :meth:`~TokenStore.atomic_refresh` on the token store,
+        which acquires an exclusive lock (file-based for all stores;
+        additionally Vault CAS for :class:`VaultTokenStore`) before calling
+        the OAuth API.  This guarantees that on a single machine only one
+        process ever calls Lightspeed with a given ``refresh_token``,
+        preventing the revocation race described in the Lightspeed docs.
         """
         if time.time() < self.expires:
             logger.debug(
@@ -762,49 +1563,57 @@ class RSeriesConnection(OAuthConnection):
             )
             return
 
-        logger.info(f"{self}: TOKEN REFRESH: Refreshing access token…")
+        logger.info(f"{self}: TOKEN REFRESH: acquiring lock…")
+        token_data, was_refreshed = self._token_store.atomic_refresh(
+            self._fetch_refreshed_token
+        )
+        if was_refreshed:
+            logger.info(
+                f"{self}: TOKEN REFRESH COMPLETE. "
+                f"Expires in {token_data.get('expires_in')}s."
+            )
+        else:
+            logger.info(
+                f"{self}: TOKEN: loaded fresh token from store "
+                "(another process already refreshed)."
+            )
+        self._apply_token(token_data)
 
-        codes = self._token_store.load()
+    def _apply_token(self, token_data: dict) -> None:
+        """Apply a token dict to this connection's session state."""
+        self.access_token = token_data["access_token"]
+        self.token_type = token_data.get("token_type", "Bearer")
+        self.scope = token_data.get("scope", self.scope)
+        self.expires_in = token_data.get("expires_in", 3600)
+        self.expires = token_data.get("last_run", time.time()) + int(self.expires_in)
+        self.refresh_token = token_data.get("refresh_token", self.refresh_token)
+        self._session.headers["authorization"] = f"Bearer {self.access_token}"
 
+    def _fetch_refreshed_token(self, codes: dict) -> dict:
+        """Exchange *codes["refresh_token"]* with Lightspeed for a new token pair.
+
+        Called by :meth:`_manage_token_refresh` (directly or via
+        :meth:`VaultTokenStore.atomic_refresh`).  Validates the *codes* dict,
+        makes the Lightspeed OAuth token endpoint request, and returns the
+        complete token dict ready to persist.
+
+        Raises :class:`MissingTokenError` on missing / bad *codes*.
+        """
         if codes is None:
             raise MissingTokenError(
                 f"No token found in {self._token_store!r}. "
-                "Run the OAuth setup flow: call RSeriesConnection.get_authorization_url() "
-                "to generate the authorization URL, direct a user to it, then pass the "
-                "returned code to RSeriesConnection.exchange_code_for_token() and save the "
-                "result to your token store."
+                "Run the OAuth setup flow."
             )
-
         if codes.get("error"):
             raise MissingTokenError(
                 f"Token store contains an error entry: {codes['error']}. "
                 "Delete the token file and re-authorise."
             )
-
         if "refresh_token" not in codes:
             raise MissingTokenError(
                 f"Token data in {self._token_store!r} is missing 'refresh_token'. "
                 "Re-run the OAuth setup flow."
             )
-
-        # If the stored token is still valid, reuse it without hitting the network.
-        # self.expires starts at 0 on every new object, so we must check the saved
-        # last_run+expires_in rather than self.expires alone — otherwise every new
-        # connection instance would refresh the token and trigger rate-limit errors.
-        token_expires_at = codes.get("last_run", 0) + codes.get("expires_in", 0)
-        if time.time() < token_expires_at - 60:  # 60-second safety buffer
-            self.access_token = codes["access_token"]
-            self.token_type = codes.get("token_type", "Bearer")
-            self.scope = codes.get("scope", self.scope)
-            self.expires_in = codes.get("expires_in", 3600)
-            self.expires = token_expires_at
-            self.refresh_token = codes["refresh_token"]
-            self._session.headers["authorization"] = f"Bearer {self.access_token}"
-            logger.info(
-                f"{self}: Token still valid for {token_expires_at - time.time():.0f}s"
-                " — skipping refresh."
-            )
-            return
 
         payload = {
             "refresh_token": codes["refresh_token"],
@@ -831,30 +1640,19 @@ class RSeriesConnection(OAuthConnection):
                     "your token store."
                 ) from exc
             raise
+
         new_codes = response.json()
-
-        self.access_token = new_codes["access_token"]
-        self.token_type = new_codes.get("token_type", "bearer")
-        self.scope = new_codes.get("scope", codes.get("scope", self.scope))
-        self.expires_in = new_codes.get("expires_in", 3600)
-        self.expires = time.time() + int(self.expires_in)
-
-        # IMPORTANT: Lightspeed issues a *new* refresh token on every refresh and
-        # immediately revokes the old one.  Always save new_codes["refresh_token"].
-        token_data = {
-            "access_token": self.access_token,
-            "expires_in": self.expires_in,
-            "token_type": self.token_type,
-            "scope": self.scope,
+        now = time.time()
+        return {
+            "access_token": new_codes["access_token"],
+            "expires_in": new_codes.get("expires_in", 3600),
+            "token_type": new_codes.get("token_type", "bearer"),
+            "scope": new_codes.get("scope", codes.get("scope", self.scope)),
+            # Lightspeed issues a new refresh_token on every refresh and
+            # immediately revokes the old one — always persist the new one.
             "refresh_token": new_codes["refresh_token"],
-            "last_run": time.time(),
+            "last_run": now,
         }
-        self._token_store.save(token_data)
-        self._session.headers["authorization"] = f"Bearer {self.access_token}"
-
-        logger.info(
-            f"{self}: TOKEN REFRESH COMPLETE. Expires in {self.expires_in}s."
-        )
 
     # ------------------------------------------------------------------
     # One-time OAuth setup helpers
@@ -961,33 +1759,50 @@ class RSeriesConnection(OAuthConnection):
         return response.json()
 
     def _handle_ratelimits(self, res):
-        # Lightspeed R Series uses a leaky bucket algorithm to throttle API calls. Manage it here.
+        # Lightspeed R Series uses a leaky-bucket + burst rate limiter.
         # https://developers.lightspeedhq.com/retail/introduction/ratelimits/
+        #
+        # We apply two proactive slow-downs based on the response headers so
+        # that we back off *before* receiving a 429, rather than only reacting
+        # after one arrives.  When a 429 does arrive it is handled by
+        # _retry_after_429 which uses the Retry-After header for precise waits.
         if "X-LS-API-Bucket-Level" in res.headers:
-            api_drip_rate = float(res.headers["X-LS-API-Drip-Rate"])
-            # Since the bucket level comes back as a fraction, we pull it appart to get the pieces we need
+            api_drip_rate = float(res.headers.get("X-LS-Api-Drip-Rate", 1))
             api_bucket_level, api_bucket_size = [
-                (float(x)) for x in res.headers["X-LS-API-Bucket-Level"].split("/")
+                float(x) for x in res.headers["X-LS-API-Bucket-Level"].split("/")
             ]
 
+            # --- Burst limiter proactive check ---
+            # Lightspeed blocks at burst_size requests/second.  If we are above
+            # 80 % of the burst window, pause for 1 s to let the window reset.
+            if "X-LS-API-Burst-Level" in res.headers:
+                burst_level, burst_size = [
+                    float(x) for x in res.headers["X-LS-API-Burst-Level"].split("/")
+                ]
+                if burst_size > 0 and burst_level / burst_size >= 0.8:
+                    logger.info(
+                        f"{self}: burst level {burst_level:.0f}/{burst_size:.0f} — "
+                        "pausing 1s to let burst window reset."
+                    )
+                    sleep(1)
+
+            # --- Leaky-bucket proactive check ---
+            # The largest individual request costs 10 drips.  Keep a headroom
+            # of 10 so the next request is never immediately rate-limited.
             logger.debug(
-                f"{self}: HANDLE RATELIMITS: Used {api_bucket_level} of {api_bucket_size} , refreshing at {api_drip_rate} and {time.time() - self.expires} sec. left on token."
+                f"{self}: bucket {api_bucket_level:.1f}/{api_bucket_size:.1f} "
+                f"drip-rate={api_drip_rate}/s"
             )
-
-            if (
-                api_bucket_size < api_bucket_level + 10
-            ):  # R-Series counts the largest requests as 10, so need to always have 10 available to avoid a 429
+            headroom = api_bucket_size - api_bucket_level
+            if headroom < 10:
+                # Wait just long enough for the bucket to drain below the
+                # headroom threshold at the current drip rate.
+                wait = (10 - headroom) / max(api_drip_rate, 0.1)
                 logger.info(
-                    f"{self}: HANDLE RATELIMITS:: Bucket is almost full, taking a break."
+                    f"{self}: bucket headroom {headroom:.1f} < 10 — "
+                    f"waiting {wait:.1f}s for bucket to drain."
                 )
-                sleep(10)
-
-            if (
-                time.time() >= self.expires
-            ):  # This should never happen because we are checking it before we make the request, but just in case. Probably remove this later
-                logger.debug(f"{self}: HANDLE RATELIMITS: Token needs a refresh")
-                sleep(2)  # Make sure lightspeed has timed out
-                self._manage_token_refresh()
+                sleep(wait)
         return
 
     def _handle_result(self, res) -> list:
@@ -1026,9 +1841,10 @@ class RSeriesConnection(OAuthConnection):
                 # resource is something like Item/1234 (Endpoint name and ID), so get the Endpoint name which is the key in the response dict
                 self.resource = list(orig_result.keys())[1]
                 result = orig_result[self.resource]
-                # Loop through the results and add the raw json to each item, which will be converted to a property later
-                for new_item, source_item in zip(result, orig_result[self.resource]):
-                    new_item["json"] = source_item
+                # Loop through the results and add the raw json to each item, which will be converted to a property later.
+                # Snapshot BEFORE adding "json" to avoid a self-referential dict (the item and the source are the same object).
+                for new_item in result:
+                    new_item["json"] = {k: v for k, v in new_item.items()}
 
             # If the result is a single item, R-series returns {'@attributes': {'count': '1', 'offset': '0', 'limit': '100'} if it was a query with one result or just if it was a get by itemID {"@attributes":{"count":"1"}
             # Regardless, dealing with 1 item needs to be handled differently
@@ -1044,7 +1860,8 @@ class RSeriesConnection(OAuthConnection):
                 self.resource = list(orig_result.keys())[1]
 
                 result = orig_result[self.resource]
-                result["json"] = orig_result[self.resource]
+                # Snapshot BEFORE adding "json" to avoid a self-referential dict.
+                result["json"] = {k: v for k, v in result.items()}
                 # If the original call was a .get() or .update() return the result as one dict (which will be converted later to an object), but if it was list(), or list_all() return a list of one dict (which will be converted to a list of one object)
                 # If limit is in the attributes, then it was a list() or list_all() call which should return a list
                 if "limit" in orig_result["@attributes"]:
@@ -1105,11 +1922,12 @@ class CSeriesConnection(Connection):
 
             # Single object returned as a dict
             if isinstance(result, dict):
-                result["json"] = orig_result[self.resource]
+                # Snapshot BEFORE adding "json" to avoid a self-referential dict.
+                result["json"] = {k: v for k, v in result.items()}
             else:
-                # List of objects — attach raw json to each item
-                for new_item, source_item in zip(result, orig_result[self.resource]):
-                    new_item["json"] = source_item
+                # List of objects — attach raw json snapshot to each item before adding the key.
+                for new_item in result:
+                    new_item["json"] = {k: v for k, v in new_item.items()}
 
             return result
 
@@ -1337,7 +2155,7 @@ class XSeriesOauthConnection(XSeriesPersonalConnection):
         X-Series uses an absolute ``expires`` Unix timestamp (not ``expires_in``).
         Raises :class:`MissingTokenError` when no valid token is available.
         """
-        codes = self._token_store.load()
+        codes = self._token_store.load_token()
 
         if codes is None or "refresh_token" not in codes:
             raise MissingTokenError(
@@ -1404,7 +2222,7 @@ class XSeriesOauthConnection(XSeriesPersonalConnection):
         self.access_token = new_codes["access_token"]
         self.expires = float(new_codes["expires"])
 
-        self._token_store.save(new_codes)
+        self._token_store.save_token(new_codes)
         self._session.headers["User-Agent"] = f"pyLightspeed/{self.host}"
         self._session.headers["authorization"] = f"Bearer {self.access_token}"
         logger.info(f"XSeriesOauthConnection({self.host}): TOKEN REFRESH COMPLETE.")

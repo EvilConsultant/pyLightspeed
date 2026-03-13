@@ -1,11 +1,12 @@
 import requests
 
 
-class Mapping(dict):
+class AttrDict(dict):
     """
-    Mapping
+    AttrDict
 
-    provides '.' access to dictionary keys
+    Provides dot-access to dictionary keys. Used as the base for all
+    resource objects returned by the API.
     """
 
     def __init__(self, mapping, *args, **kwargs):
@@ -34,8 +35,43 @@ class Mapping(dict):
     def __repr__(self):
         return "<%s at %s, %s>" % (type(self).__name__, hex(id(self)), str(self))
 
+    def to_dict(self, _seen=None):
+        """Return a plain nested dict representation of this resource.
 
-class ApiResource(Mapping):
+        Unlike ``flat_dict()``, nested dicts and lists are preserved and
+        recursively converted to plain Python types.  Keys starting with
+        ``_`` are excluded at every nesting level.  Circular references are
+        broken by omitting the repeated object (following the same
+        add-on-enter / remove-on-exit strategy used by Python's own JSON
+        encoder, so shared-but-non-circular references are serialized in
+        full at each location they appear).
+        """
+        if _seen is None:
+            _seen = set()
+        return _nested_to_plain(self, _seen)
+
+
+def _nested_to_plain(obj, seen):
+    if isinstance(obj, dict):
+        oid = id(obj)
+        if oid in seen:
+            return None
+        seen.add(oid)
+        result = {k: _nested_to_plain(v, seen) for k, v in obj.items() if not k.startswith("_")}
+        seen.discard(oid)
+        return result
+    if isinstance(obj, list):
+        oid = id(obj)
+        if oid in seen:
+            return None
+        seen.add(oid)
+        result = [_nested_to_plain(v, seen) for v in obj]
+        seen.discard(oid)
+        return result
+    return obj
+
+
+class ApiResource(AttrDict):
     # Since these objects have to adapt based on the different models and data structures used by Lightspeed, we build in
     # flexibility to allow us to override the default values for the resource name, id, and created_at/updated_at fields.
     resource_name = ""  # The identifier which describes this resource in urls
@@ -66,21 +102,23 @@ class ApiResource(Mapping):
         return "%s/%s" % (cls.resource_name, id)
 
     @classmethod
-    def get(cls, id, connection=None, **params):
+    def fetch(cls, id, connection=None, **params):
         response = cls._make_request("GET", cls._get_path(id), connection, params=params)
         return cls._create_object(response, connection=connection)
 
-    def nested_json_to_attr(self):
-        """
-        Override this to map any nested properties returned by the API to something simpler. For example,
-        mapping a nested property like `self["address"]["street"]` to `self["street"]`.
+    def _map_fields(self):
+        """Override to derive convenience attributes from nested API data.
+
+        Called from ``flat_dict()`` and, for resource classes that need it,
+        from their own ``__init__``.  The base implementation is a no-op;
+        override in concrete resource classes.
         """
         pass
 
-    def as_dict(self):
-        """Return a flat, predictable dict of this resource's scalar data.
+    def flat_dict(self):
+        """Return a flat, scalar-only snapshot of this resource's data.
 
-        Calls ``nested_json_to_attr()`` first so any derived attributes
+        Calls ``_map_fields()`` first so any derived attributes
         (e.g. ``price_default`` on RSeries Items) are populated before
         extraction.
 
@@ -88,7 +126,7 @@ class ApiResource(Mapping):
         float, bool, None) are included — nested dicts and lists are omitted.
         Call ``dict(self)`` directly if you need the full nested structure.
         """
-        self.nested_json_to_attr()
+        self._map_fields()
         result = {}
         for key, val in self.items():
             if key.startswith("_"):
@@ -107,7 +145,7 @@ class ApiSubResource(ApiResource):
         return "%s/%s/%s/%s" % (cls.parent_resource, parentid, cls.resource_name, id)
 
     @classmethod
-    def get(cls, parentid, id, connection=None, **params):
+    def fetch(cls, parentid, id, connection=None, **params):
         response = cls._make_request("GET", cls._get_path(id, parentid), connection, params=params)
         return cls._create_object(response, connection=connection)
 
@@ -181,11 +219,11 @@ class ListableApiResource(ApiResource):
         return cls._create_object(request, connection=connection)
 
     @classmethod
-    def listall(cls, connection=None, **params):
+    def list_all(cls, connection=None, **params):
         """
         Returns all of the resources in a list, automatically handling pagination.
         Use this if you need to pull all of the resources for exports or something.
-        Otherwise, consider using the iterall method.
+        Otherwise, consider using the iter_all method.
         """
         all_resources = []
         page = 1
@@ -209,9 +247,9 @@ class ListableApiResource(ApiResource):
         return all_resources  # Not sending this to _create_object because the .all() method already does that
 
     @classmethod
-    def iterall(cls, connection=None, **kwargs):
+    def iter_all(cls, connection=None, **kwargs):
         """
-        Returns a autopaging generator that yields each object returned one by one.
+        Returns an auto-paging generator that yields each object returned one by one.
         """
 
         try:
@@ -256,172 +294,16 @@ class ListableApiResource(ApiResource):
         """Return all records, optionally filtered to those updated since *since*.
 
         C / X / E series edition — uses ``updated_at_min`` filter convention.
-        Returns a list (same contract as ``listall``).
+        Returns a list (same contract as ``list_all``).
 
         For R-Series resources, see ``RSeriesApiResource.sync_records``
         which uses the RSeries filter syntax and streams results.
         """
         if since is not None:
             params["updated_at_min"] = since.strftime("%Y-%m-%d %H:%M:%S")
-        return cls.listall(connection=connection, **params)
+        return cls.list_all(connection=connection, **params)
 
 
-# This class is superseded by RSeriesApiResource in rseries/rseriesbase.py.
-# Kept here for backwards compatibility with any external code that inherits
-# from it directly.  New code should use RSeriesApiResource instead.
-class ListableRetailApiResource(ListableApiResource):
-    """Deprecated — use ``RSeriesApiResource`` from rseries.rseriesbase instead.
-
-    This class remains for backwards compatibility.  Its pagination logic
-    has been consolidated into ``RSeriesApiResource``.  All built-in RSeries
-    resource classes now inherit from ``RSeriesApiResource`` directly.
-    """
-
-    created_at = "createTime"
-    updated_at = "timeStamp"
-
-    # Properties to manage pagination
-    count = 0
-    limit = 100  # https://developers.lightspeedhq.com/retail/introduction/pagination/
-    offset = 0
-
-    @classmethod
-    def iterall(cls, connection=None, **kwargs):
-        """
-        Returns an autopaging generator that yields each object returned one by one.
-
-        :param connection: Connection object (optional) - the connection object to use for making the request
-        :param limit: int (optional) - the number of objects to return per page
-        :param offset: int (optional) - the number of objects to skip before returning objects
-        :param page: bool (optional) - if True, will return a whole page of objects as the iterator; if False, will return one object at a time
-
-        :return: Generator - a generator that yields each object returned one by one
-        """
-
-        try:
-            limit = kwargs["limit"]
-        except KeyError:
-            limit = 100
-
-        try:
-            offset = kwargs["offset"]
-        except KeyError:
-            offset = None
-
-        try:
-            page = kwargs["page"]
-        except KeyError:
-            page = None
-
-        # TODO: This is not handling the @attributes which contains the counts and the pagination information. Need to figure out how to get this information in here.
-        def _all_responses():
-            offset = 1  # one based
-            limit = 100
-            params = kwargs.copy()
-
-            while True:
-                params.update(offset=offset, limit=limit)
-                rsp = cls._make_request("GET", cls._get_all_path(), connection, params=params)
-                if rsp:
-                    yield rsp
-                    offset = connection.offset + connection.limit
-                else:
-                    yield []  # needed for case where there are no objects
-                    break
-
-        if not (limit or offset):
-            for rsp in _all_responses():
-                for obj in rsp:
-                    yield cls._create_object(obj, connection=connection)
-
-        else:
-            response = cls._make_request("GET", cls._get_all_path(), connection, params=kwargs)
-            # Added to try to handle the case where there are no objects returned, but we still need a list to iterate over. Without this, iterators are picking up the connection object and trying to iterate over that.
-            if response is None or len(response) == 0:
-                return
-
-            for obj in cls._create_object(response, connection=connection):
-                yield obj
-
-    @classmethod
-    def iter(cls, connection=None, yield_per_item=True, **params):
-        """
-        Generator function that yields resources from the server, handling pagination.
-        If yield_per_item is True, yields each item one at a time.
-        If yield_per_item is False, yields the whole page at once.
-        """
-
-        limit = params.get("limit", 100)  # LS max is 100
-        offset = params.get("offset", 0)
-
-        while True:
-            params["limit"] = limit
-            params["offset"] = offset
-
-            # Fetch the current page of results
-            response = cls.page(connection=connection, **params)
-
-            # If there's no data or count is 0, stop the iterator
-            if not response or connection.count == "0":
-                break
-
-            if yield_per_item:
-                # Yield each item in the current page of results
-                for item in response:
-                    yield item
-            else:
-                # Yield the whole page at once
-                yield response
-
-            # Prepare for the next page
-            offset += limit
-
-            # Stop if we've fetched all results
-            if connection.count < offset:
-                break
-
-    @classmethod
-    def listall(cls, connection=None, **params):
-        """
-        Returns all of the resources in a list, automatically handling pagination.
-        Use this if you need to pull all of the resources for exports or something.
-        Otherwise, consider using the iterall method.
-        """
-
-        try:
-            limit = params["limit"]
-        except KeyError:
-            limit = 100  # LS max is 100
-
-        try:
-            offset = params["offset"]
-        except KeyError:
-            offset = None
-
-        all_resources = []
-
-        # try:
-
-        # response = cls._make_request("GET", cls._get_all_path(), connection, params=params)
-        response = cls.page(connection=connection, **params)
-        all_data = response
-
-        if connection.count == "0":
-            return all_data  # Should probably do something better here. If the filter is returning no rows this is failing - need to handle more gracefully.
-
-        while connection.count >= (connection.offset + connection.limit):
-            params["offset"] = connection.offset + connection.limit
-            # response = cls._make_request("GET", cls._get_all_path(), connection, params=params)
-            # Messing with this because it looks like listall() is not returning a list of objects, but a dict? Has it always been doing this?
-            response = cls.page(connection=connection, **params)
-            if (
-                response is not None
-            ):  # Added this because got a response of None and it was breaking the loop. Response should never be None - connection._make_request should always return a list
-                all_data.extend(response)
-            else:
-                break
-
-        return all_data
 
 
 class ListableApiSubResource(ApiSubResource):

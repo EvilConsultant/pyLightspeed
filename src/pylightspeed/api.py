@@ -47,6 +47,19 @@ class LightspeedApi(object):
     def __getattr__(self, item):
         return ApiResourceWrapper(item, self)
 
+    @staticmethod
+    def _resolve_from_store(token_store, key_map: dict) -> dict:
+        """Return credential values from *token_store.load_credentials()*.
+
+        *key_map* maps local parameter names to the standard credential key
+        names (e.g. ``{"client_id": "LSR_CLIENT_ID"}``).  Returns a dict with
+        the same keys and the resolved values (``None`` when not found).
+        """
+        if token_store is None:
+            return {param: None for param in key_map}
+        creds = token_store.load_credentials() or {}
+        return {param: creds.get(cred_key) for param, cred_key in key_map.items()}
+
 
 class LightspeedCSeriesApi(LightspeedApi):
     """API client for the Lightspeed C-Series (eCom) API.
@@ -54,7 +67,7 @@ class LightspeedCSeriesApi(LightspeedApi):
     Uses HTTP Basic Auth (API key + secret). No OAuth or token management required.
     """
 
-    def __init__(self, host="api.shoplightspeed.com", api_key=None, api_secret=None, basic_auth=None, api_path="/us/{}"):
+    def __init__(self, host="api.shoplightspeed.com", api_key=None, api_secret=None, basic_auth=None, api_path="/us/{}", token_store=None):
         """Initializes the LightspeedCSeriesApi instance.
 
         Args:
@@ -66,16 +79,41 @@ class LightspeedCSeriesApi(LightspeedApi):
                 over *api_key* / *api_secret* if both are supplied.
             api_path (str): The URL path template containing ``{}`` as the resource
                 placeholder. Defaults to ``"/us/{}"``.
+            token_store (TokenStore | None): Optional store whose
+                :meth:`~TokenStore.load_credentials` is called to supply
+                ``LSC_API_KEY``, ``LSC_API_SECRET``, ``LSC_API_HOST``, and
+                ``LSC_API_PATH`` when explicit args are not provided.
+
+        Raises:
+            MissingCredentialsError: If neither *basic_auth* nor both *api_key* and
+                *api_secret* can be resolved.
         """
         self.namespace = "CSeries"
-        # you can either pass the api_key and api_secret or basic_auth. However, basic_auth is what is used.
+
+        # Unpack credentials from store; explicit args always win
+        _store = self._resolve_from_store(token_store, {
+            "api_key": "LSC_API_KEY",
+            "api_secret": "LSC_API_SECRET",
+            "lsc_host": "LSC_API_HOST",
+            "lsc_path": "LSC_API_PATH",
+        })
+        api_key    = api_key    or _store["api_key"]
+        api_secret = api_secret or _store["api_secret"]
+        if host == "api.shoplightspeed.com":
+            host = _store["lsc_host"] or host
+        if api_path == "/us/{}":
+            api_path = _store["lsc_path"] or api_path
+
         if api_key and api_secret:
             basic_auth = (api_key, api_secret)
 
-        if host and basic_auth:
-            self.connection = CSeriesConnection(host, basic_auth, api_path=api_path)
-            self.created_at = "createdAt"
-            self.updated_at = "updatedAt"
+        if not basic_auth:
+            missing = [k for k, v in [("api_key", api_key), ("api_secret", api_secret)] if not v]
+            raise MissingCredentialsError("LightspeedCSeriesApi", missing or ["api_key and api_secret"])
+
+        self.connection = CSeriesConnection(host, basic_auth, api_path=api_path)
+        self.created_at = "createdAt"
+        self.updated_at = "updatedAt"
 
 
 class LightspeedRSeriesApi(LightspeedApi):
@@ -96,20 +134,38 @@ class LightspeedRSeriesApi(LightspeedApi):
                 *token_store* is provided. A `FileTokenStore` is created automatically
                 from this path.
             token_store (TokenStore | None): A `TokenStore` instance for custom token
-                persistence.
+                persistence. If the store implements :meth:`~TokenStore.load_credentials`,
+                ``LSR_CLIENT_ID``, ``LSR_CLIENT_SECRET``, and ``LSR_ACCOUNT_ID`` are
+                pulled from it automatically when not supplied as explicit args.
         """
         self.namespace = "RSeries"
         self.api_service = "api.lightspeedapp.com"
         self.auth_service = "cloud.lightspeedapp.com"
         if token_store is None and token_file:
             token_store = FileTokenStore(token_file)
-        if client_id and client_secret and token_store:
-            self.connection = RSeriesConnection(
-                account_id, client_id, client_secret,
-                host=self.api_service, token_store=token_store,
-            )
-            self.created_at = "createTime"
-            self.updated_at = "timeStamp"
+
+        # Unpack credentials from store; explicit args always win
+        _store = self._resolve_from_store(token_store, {
+            "client_id": "LSR_CLIENT_ID",
+            "client_secret": "LSR_CLIENT_SECRET",
+            "account_id": "LSR_ACCOUNT_ID",
+        })
+        client_id     = client_id     or _store["client_id"]
+        client_secret = client_secret or _store["client_secret"]
+        account_id    = account_id    or _store["account_id"]
+
+        missing = [k for k, v in [("client_id", client_id), ("client_secret", client_secret)] if not v]
+        if not token_store:
+            missing.append("token_store or token_file")
+        if missing:
+            raise MissingCredentialsError("LightspeedRSeriesApi", missing)
+
+        self.connection = RSeriesConnection(
+            account_id, client_id, client_secret,
+            host=self.api_service, token_store=token_store,
+        )
+        self.created_at = "createTime"
+        self.updated_at = "timeStamp"
 
 
 class LightspeedXSeriesApi(LightspeedApi):
@@ -137,7 +193,9 @@ class LightspeedXSeriesApi(LightspeedApi):
             token_file (str | None): Path to a token JSON file. Ignored when
                 *token_store* is provided. A `FileTokenStore` is created automatically.
             token_store (TokenStore | None): A `TokenStore` instance for OAuth token
-                storage.
+                storage. If the store implements :meth:`~TokenStore.load_credentials`,
+                ``LSX_DOMAIN_PREFIX``, ``LSX_PERSONAL_TOKEN``, and ``LSX_CLIENT_ID`` /
+                ``LSX_CLIENT_SECRET`` are pulled from it when not supplied as explicit args.
 
         Raises:
             ValueError: If neither a personal-token pair nor OAuth credentials are
@@ -150,6 +208,21 @@ class LightspeedXSeriesApi(LightspeedApi):
         self.api_service = "retail.lightspeed.app"
         self.auth_service = "secure.retail.lightspeed.app"
 
+        if token_store is None and token_file:
+            token_store = FileTokenStore(token_file)
+
+        # Unpack credentials from store; explicit args always win
+        _store = self._resolve_from_store(token_store, {
+            "domain_prefix": "LSX_DOMAIN_PREFIX",
+            "personal_token": "LSX_PERSONAL_TOKEN",
+            "client_id": "LSX_CLIENT_ID",
+            "client_secret": "LSX_CLIENT_SECRET",
+        })
+        domain_prefix  = domain_prefix  or _store["domain_prefix"]
+        personal_token = personal_token or _store["personal_token"]
+        client_id      = client_id      or _store["client_id"]
+        client_secret  = client_secret  or _store["client_secret"]
+
         # Personal token connection
         if domain_prefix and personal_token:
             self.connection = XSeriesPersonalConnection(
@@ -158,11 +231,10 @@ class LightspeedXSeriesApi(LightspeedApi):
 
         # OAuth connection
         elif client_id:
-            if token_store is None and token_file:
-                token_store = FileTokenStore(token_file)
             if token_store is None:
-                raise ValueError(
-                    "An OAuth connection requires either token_store or token_file."
+                raise MissingCredentialsError(
+                    "LightspeedXSeriesApi",
+                    ["token_store or token_file (required for OAuth)"],
                 )
             self.connection = XSeriesOauthConnection(
                 client_id,
@@ -171,9 +243,10 @@ class LightspeedXSeriesApi(LightspeedApi):
             )
 
         else:
-            raise ValueError(
-                "Provide domain_prefix + personal_token for a personal-token connection, "
-                "or client_id + (token_file or token_store) for an OAuth connection."
+            raise MissingCredentialsError(
+                "LightspeedXSeriesApi",
+                ["domain_prefix + personal_token (personal token auth)",
+                 "OR client_id + token_store (OAuth)"],
             )
 
 

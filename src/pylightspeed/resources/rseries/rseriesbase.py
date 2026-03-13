@@ -27,7 +27,7 @@ class RSeriesApiResource(ListableApiResource):
     # ------------------------------------------------------------------
 
     @classmethod
-    def iterall(cls, connection=None, **kwargs):
+    def iter_all(cls, connection=None, **kwargs):
         """Auto-paging generator — yields each object one at a time.
 
         R-Series edition: uses offset/limit pagination (not page-based).
@@ -104,7 +104,7 @@ class RSeriesApiResource(ListableApiResource):
                 break
 
     @classmethod
-    def listall(cls, connection=None, **params):
+    def list_all(cls, connection=None, **params):
         """Return all resources as a list, auto-handling R-Series pagination."""
         try:
             limit = params["limit"]

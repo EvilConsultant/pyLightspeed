@@ -115,12 +115,12 @@ class TestRSeriesLive:
         assert "employeeID" in first, f"Missing employeeID in: {first.keys()}"
         assert "firstName" in first, f"Missing firstName in: {first.keys()}"
 
-    def test_employee_listall_returns_all(self, rseries_api):
-        """Employees.listall() should return at least as many results as a single page."""
+    def test_employee_list_all_returns_all(self, rseries_api):
+        """Employees.list_all() should return at least as many results as a single page."""
         page = rseries_api.Employees.page()
-        all_employees = rseries_api.Employees.listall()
+        all_employees = rseries_api.Employees.list_all()
         assert len(all_employees) >= len(page), (
-            f"listall() returned {len(all_employees)} but page() returned {len(page)}"
+            f"list_all() returned {len(all_employees)} but page() returned {len(page)}"
         )
 
 
@@ -152,10 +152,10 @@ class TestCSeriesLive:
         assert "id" in first, f"Missing id in: {first.keys()}"
         assert "title" in first, f"Missing title in: {first.keys()}"
 
-    def test_filters_listall_at_least_as_large_as_page(self, cseries_api):
-        """Filters.listall() should return at least as many records as a single page."""
+    def test_filters_list_all_at_least_as_large_as_page(self, cseries_api):
+        """Filters.list_all() should return at least as many records as a single page."""
         page = cseries_api.Filters.page()
-        all_filters = cseries_api.Filters.listall()
+        all_filters = cseries_api.Filters.list_all()
         assert len(all_filters) >= len(page), (
-            f"listall() returned {len(all_filters)} but page() returned {len(page)}"
+            f"list_all() returned {len(all_filters)} but page() returned {len(page)}"
         )
