@@ -32,11 +32,11 @@ class ESeriesApiResource(ApiResource):
         return cls.page(connection=connection, offset=offset, **params)
 
     @classmethod
-    def listall(cls, connection=None, **params) -> list:
+    def list_all(cls, connection=None, **params) -> list:
         """
         Returns all of the resources in a list, automatically handling pagination.
         Use this if you need to pull all of the resources for exports or something.
-        Otherwise, consider using the iterall method. Note: pagination parameters are
+        Otherwise, consider using the iter_all method. Note: pagination parameters are
         handled/set by the connection._handle_response method.
 
         Args:

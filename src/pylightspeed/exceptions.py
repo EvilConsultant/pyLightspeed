@@ -58,6 +58,23 @@ class ServerException(HttpException):
     pass
 
 
+class MissingCredentialsError(Exception):
+    """Raised when a required credential is not available from any source.
+
+    Attributes:
+        missing (list[str]): Names of the missing credentials.
+    """
+
+    def __init__(self, api_name: str, missing: list[str]):
+        self.missing = list(missing)
+        keys = ", ".join(self.missing)
+        super().__init__(
+            f"{api_name} is missing required credentials: {keys}. "
+            f"Provide them as constructor arguments or via a TokenStore "
+            f"that implements load_credentials()."
+        )
+
+
 # class ServiceUnavailable(ServerException): pass
 # class StorageCapacityError(ServerException): pass
 # class BandwidthExceeded(ServerException): pass

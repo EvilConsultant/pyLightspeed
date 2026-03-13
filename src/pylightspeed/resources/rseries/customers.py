@@ -16,9 +16,9 @@ class RSeriesCustomers(RSeriesApiResource, CreateableApiResource, UpdateableReta
             The product id."""
 
         if id:
-            return Contacts.get(self.itemID, id, connection=self._connection)
+            return Contacts.fetch(self.itemID, id, connection=self._connection)
         else:
-            return Contacts.listall(self.itemID, connection=self._connection)
+            return Contacts.list_all(self.itemID, connection=self._connection)
 
 
 class Contacts(ListableApiSubResource):
