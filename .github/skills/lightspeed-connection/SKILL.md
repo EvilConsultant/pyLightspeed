@@ -231,7 +231,7 @@ The script will:
 For Vault storage, set these before running:
 
 ```env
-VAULT_ADDR=http://192.168.1.254:8200/
+VAULT_ADDR=http://vault.local:8200/
 VAULT_TOKEN=your-token
 VAULT_LSR_TOKEN_PATH=lightspeed/stores/1/token
 VAULT_LSR_CREDENTIALS_PATHS=lightspeed/shared,lightspeed/stores/1/creds
