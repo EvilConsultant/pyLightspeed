@@ -1,7 +1,8 @@
 from ..base import *
+from .rseriesbase import *
 
 
-class RSeriesItems(ListableRetailApiResource, CreateableApiResource, UpdateableRetailApiResource, DeleteableApiResource):
+class RSeriesItems(RSeriesApiResource, CreateableApiResource, UpdateableRetailApiResource, DeleteableApiResource):
     resource_name = "Item"
     resource_id = "itemID"
 
@@ -22,21 +23,23 @@ class RSeriesItems(ListableRetailApiResource, CreateableApiResource, UpdateableR
     #         return ProductDiscountRules.get(self.id, id, connection=self._connection)
     #     else:
     #         return ProductDiscountRules.all(self.id, connection=self._connection)
-    def nested_json_to_attr(self):
-        """Fills in the Item table with data from the Lightspeed Item object that is not automatically mapped."""
-        # Lightspeed returns: 'Note': {'note': '', 'isPublic': 'false', 'timeStamp': '2022-08-24T17:30:57+00:00'},
-        # obj.note=tbl.Note["note"]
-        # obj.note_isPublic=tbl.Note["isPublic"]
-        # obj.note_timeStamp=tbl.Note["timeStamp"]
-        # Lightspeed returns: 'Prices': {'ItemPrice': [{'amount': '22.49', 'useTypeID': '1', 'useType': 'Default'}, {'amount': '22.49', 'useTypeID': '2', 'useType': 'MSRP'}, {'amount': '22.49', 'useTypeID': '3', 'useType': 'Online'}, {'amount': '22.49', 'useTypeID': '4', 'useType': 'Promotion'}]}}
-        self.price_default = self["Prices"]["ItemPrice"][0]["amount"]
-        self.price_msrp = self["Prices"]["ItemPrice"][1]["amount"]
-        self.price_online = self["Prices"]["ItemPrice"][2]["amount"]
-        self.price_promotion = self["Prices"]["ItemPrice"][3]["amount"]
-        # Lightspeed returns: 'ItemShops': {'ItemShop': [{'itemShopID': '111041', 'qoh': '10', 'sellable': '10', 'backorder': '0', 'componentQoh': '0', 'componentBackorder': '0', 'reorderPoint': '0', 'reorderLevel': '0', 'timeStamp': '2022-09-01T16:37:25+00:00', 'itemID': '4564', 'shopID': '0'}, {'itemShopID': '111042', 'qoh': '10', 'sellable': '10', 'backorder': '0', 'componentQoh': '0', 'componentBackorder': '0', 'reorderPoint': '0', 'reorderLevel': '0', 'timeStamp': '2022-09-01T16:37:25+00:00', 'itemID': '4564', 'shopID': '1'}]},
+    def __init__(self, mapping, *args, **kwargs):
+        super().__init__(mapping, *args, **kwargs)
+        self._map_fields()
+
+    def _map_fields(self):
+        """Derives convenience attributes from nested Lightspeed Item data."""
+        try:
+            prices = self["Prices"]["ItemPrice"]
+            self.price_default   = prices[0]["amount"]
+            self.price_msrp      = prices[1]["amount"]
+            self.price_online    = prices[2]["amount"]
+            self.price_promotion = prices[3]["amount"]
+        except (KeyError, IndexError, TypeError):
+            pass
         try:
             self.qoh = self["ItemShops"]["ItemShop"][0]["qoh"]
-        except:
+        except (KeyError, IndexError, TypeError):
             self.qoh = 0
 
     def images(self, id=None):
@@ -49,7 +52,7 @@ class RSeriesItems(ListableRetailApiResource, CreateableApiResource, UpdateableR
             The product id."""
 
         if id:
-            return ItemImages.get(self.itemID, id, connection=self._connection)
+            return ItemImages.fetch(self.itemID, id, connection=self._connection)
         else:
             return ItemImages.all(self.itemID, connection=self._connection)
 
@@ -63,7 +66,7 @@ class RSeriesItems(ListableRetailApiResource, CreateableApiResource, UpdateableR
             The product id."""
 
         if id:
-            return ItemPrices.get(self.itemID, id, connection=self._connection)
+            return ItemPrices.fetch(self.itemID, id, connection=self._connection)
         else:
             return ItemPrices.all(self.itemID, connection=self._connection)
 

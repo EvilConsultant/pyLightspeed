@@ -31,11 +31,11 @@ class XSeriesApiResource(ApiResource):
             # https://x-series-api.lightspeedhq.com/docs/products_image_uploads_code_sample_python_requests
 
     @classmethod
-    def listall(cls, connection=None, **params):
+    def list_all(cls, connection=None, **params):
         """
         Returns all of the resources in a list, automatically handling pagination.
         Use this if you need to pull all of the resources for exports or something.
-        Otherwise, consider using the iterall method.
+        Otherwise, consider using the iter_all method.
         """
         # Note: page_max is created and set as part of connection.XSeriesPersonalConnection._handle_result
         all_resources = []

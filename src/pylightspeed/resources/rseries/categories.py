@@ -1,7 +1,8 @@
 from ..base import *
+from .rseriesbase import *
 
 
-class RSeriesCategories(ListableRetailApiResource, UpdateableRetailApiResource, CreateableApiResource, CountableApiResource):
+class RSeriesCategories(RSeriesApiResource, UpdateableRetailApiResource, CreateableApiResource, CountableApiResource):
     """LS Retail Categories API Resource. https://developers.lightspeedhq.com/retail/endpoints/Category/"""
     resource_name = 'Category'
     resource_id = 'categoryID'

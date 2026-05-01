@@ -9,6 +9,12 @@ build/
 .pytest_cache/
 .ruff_cache/
 
+# MkDocs built site
+site/
+
 # Credentials — never commit
 .env
 .codes/
+
+# Live-test JSON log output
+tests/output/

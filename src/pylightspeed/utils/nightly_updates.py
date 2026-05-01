@@ -7,12 +7,9 @@ currentdir = os.path.dirname(os.path.realpath(__file__))
 parentdir = os.path.dirname(currentdir)
 sys.path.append(parentdir)
 
-import logging
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
-logging.debug('Start of program')
-
-
-logging.debug(sys.path)
+from loguru import logger
+logger.debug('Start of program')
+logger.debug(sys.path)
 
 import api
 import store
@@ -31,4 +28,4 @@ data = {'Contact':{'noEmail': 'false','noPhone':'false','noMail':'false'}}
 
 for customer in customers:
     customer.update(data)
-    logging.debug(f"Updated {customer.customerID} {customer.firstName} {customer.lastName}")   
+    logger.debug(f"Updated {customer.customerID} {customer.firstName} {customer.lastName}")

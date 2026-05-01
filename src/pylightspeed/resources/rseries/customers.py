@@ -1,7 +1,8 @@
 from ..base import *
+from .rseriesbase import *
 
 
-class RSeriesCustomers(ListableRetailApiResource, CreateableApiResource, UpdateableRetailApiResource, DeleteableApiResource):
+class RSeriesCustomers(RSeriesApiResource, CreateableApiResource, UpdateableRetailApiResource, DeleteableApiResource):
     resource_name = "Customer"
     resource_id = "customerID"
 
@@ -15,9 +16,9 @@ class RSeriesCustomers(ListableRetailApiResource, CreateableApiResource, Updatea
             The product id."""
 
         if id:
-            return Contacts.get(self.itemID, id, connection=self._connection)
+            return Contacts.fetch(self.itemID, id, connection=self._connection)
         else:
-            return Contacts.listall(self.itemID, connection=self._connection)
+            return Contacts.list_all(self.itemID, connection=self._connection)
 
 
 class Contacts(ListableApiSubResource):

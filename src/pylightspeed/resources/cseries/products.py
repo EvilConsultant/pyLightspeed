@@ -38,9 +38,9 @@ class CSeriesProducts(
             The product id."""
 
         if id:
-            return CSeriesProductImages.get(self.id, id, connection=self._connection)
+            return CSeriesProductImages.fetch(self.id, id, connection=self._connection)
         else:
-            return CSeriesProductImages.listall(self.id, connection=self._connection)
+            return CSeriesProductImages.list_all(self.id, connection=self._connection)
 
 
 class CSeriesProductImages(

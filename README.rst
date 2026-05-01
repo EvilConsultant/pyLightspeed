@@ -107,33 +107,6 @@ Accessing Different API Version endpoints
 Override the api version by passing the version parameter to the api object, or use the resource object to access a specific version.
 See resources/xseries/products.update_path() for an example of how to override the path for a specific resource, or specific call (get, post, put, delete) for a resource.
 
-Managing OAuth Rate Limits
-~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-You can optionally pass a ``rate_limiting_management`` object into ``bigcommerce.api.BigcommerceApi`` or ``bigcommerce.connection.OAuthConnection`` for automatic rate limiting management, ex:
-
-.. code:: python
-
-    import bigcommerce
-
-    api = bigcommerce.api.BigcommerceApi(client_id='', store_hash='', access_token='', rate_limiting_management= {'min_requests_remaining':2,'wait':True,'callback_function':None})
-
-
-``min_requests_remaining`` will determine the number of requests remaining in the rate limiting window which will invoke the management function
-
-``wait`` determines whether or not we should automatically sleep until the end of the window
-
-``callback_function`` is a function to run when the rate limiting management function fires. It will be invoked *after* the wait, if enabled.
-
-``callback_args`` is an optional parameter which is a dictionary passed as an argument to the callback function.
-
-For simple applications which run API requests in serial (and aren't interacting with many different stores, or use a separate worker for each store) the simple sleep function may work well enough for most purposes. For more complex applications that may be parallelizing API requests on a given store, it's adviseable to write your own callback function for handling the rate limiting, use a ``min_requests_remaining`` higher than your concurrency, and not use the default wait function.
-
-Further documentation
----------------------
-
-Full documentation of the API is available on the Bigcommerce
-`Developer Portal <http://developer.bigcommerce.com>`__
 
 To do
 -----
