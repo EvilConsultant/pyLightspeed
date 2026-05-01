@@ -137,7 +137,20 @@ class LightspeedRSeriesApi(LightspeedApi):
                 persistence. If the store implements :meth:`~TokenStore.load_credentials`,
                 ``LSR_CLIENT_ID``, ``LSR_CLIENT_SECRET``, and ``LSR_ACCOUNT_ID`` are
                 pulled from it automatically when not supplied as explicit args.
+
+        Warning:
+            The `host` parameter is deprecated and will be removed in a future version.
+            The R-Series API endpoint is fixed and cannot be customized. This parameter
+            is kept only for backwards compatibility and has no effect if provided.
         """
+        # Warn if the deprecated host parameter is explicitly provided
+        if host != "api.shoplightspeed.com":
+            import warnings
+            _msg = (
+                "The 'host' parameter to LightspeedRSeriesApi() is deprecated and has no effect. "
+                "The R-Series API endpoint is fixed. This parameter will be removed in a future version."
+            )
+            warnings.warn(_msg, DeprecationWarning, stacklevel=2)
         self.namespace = "RSeries"
         self.api_service = "api.lightspeedapp.com"
         self.auth_service = "cloud.lightspeedapp.com"

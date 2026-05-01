@@ -143,7 +143,7 @@ class TokenLock(ABC):
 
     @abstractmethod
     @contextmanager
-    def acquire(self, key: str, timeout: float = 30.0, stale_after: float = 60.0):
+    def acquire(self, key: str, timeout: float = 30.0, stale_after: float = 15.0):
         """Acquire exclusive access keyed on *key*, yield, then release."""
         ...  # pragma: no cover
 
@@ -159,7 +159,7 @@ class FileLock(TokenLock):
     """
 
     @contextmanager
-    def acquire(self, key: str, timeout: float = 30.0, stale_after: float = 60.0):
+    def acquire(self, key: str, timeout: float = 30.0, stale_after: float = 15.0):
         lock_name = hashlib.sha1(key.encode()).hexdigest()[:16]
         lock_path = os.path.join(
             tempfile.gettempdir(), f"pylightspeed_{lock_name}.lock"
@@ -629,7 +629,7 @@ class VaultCASLock(TokenLock):
             raise
 
     @contextmanager
-    def acquire(self, key: str, timeout: float = 30.0, stale_after: float = 60.0):
+    def acquire(self, key: str, timeout: float = 30.0, stale_after: float = 15.0):
         """Acquire the Vault distributed lock, yield, then release.
 
         The *key* argument is accepted for protocol compatibility but ignored
