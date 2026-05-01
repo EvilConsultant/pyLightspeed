@@ -15,7 +15,7 @@ import api
 import store
 
 
-KEY_FILE = "D:\\Development\\.keys\\vintage_keys.json"
+KEY_FILE = "D:\\Development\\.keys\\vi..._keys.json"
 my_store = store.LightspeedStore(KEY_FILE)
 
 lsretail = api.LightspeedApi(client_id=my_store.client_id, client_secret=my_store.client_secret, store_hash=my_store.account_id, access_token=my_store.access_token, token_file = my_store.token_file, host=my_store.retail_api_host, rate_limiting_management = {'min_requests_remaining':2, 'wait':True, 'callback_function':None})
@@ -28,4 +28,4 @@ data = {'Contact':{'noEmail': 'false','noPhone':'false','noMail':'false'}}
 
 for customer in customers:
     customer.update(data)
-    logger.debug(f"Updated {customer.customerID} {customer.firstName} {customer.lastName}")   
+    logger.debug(f"Updated {customer.customerID} {customer.firstName} {customer.lastName}")
