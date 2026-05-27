@@ -14,6 +14,7 @@ site/
 
 # Credentials — never commit
 .env
+.env.*
 .codes/
 
 # Live-test JSON log output
