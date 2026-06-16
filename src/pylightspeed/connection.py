@@ -276,6 +276,8 @@ class TokenStore(ABC):
         self,
         do_refresh_fn,
         expiry_buffer: int = 60,
+        force: bool = False,
+        stale_access_token: str | None = None,
     ) -> tuple[dict, bool]:
         """Refresh the token exactly once across all threads and processes.
 
@@ -308,14 +310,40 @@ class TokenStore(ABC):
                 raise MissingTokenError(
                     f"No token found in {self!r}. Run the OAuth setup flow."
                 )
+
+            # FORCE / 401 path: the server has explicitly rejected an access token, so the local
+            # expiry clock is NOT trustworthy (the token was revoked before its nominal expiry —
+            # the classic refresh-token-rotation revocation). Before minting a new token, see if a
+            # peer already replaced the one that failed: if the stored access token differs from the
+            # one that 401'd, adopt the peer's token instead of refreshing again (avoids rotation
+            # thrash where two consumers keep invalidating each other's tokens).
+            if force and stale_access_token is not None:
+                if codes.get("access_token") != stale_access_token:
+                    logger.info(
+                        f"atomic_refresh: a peer already replaced the failed token in {self!r} "
+                        "— adopting it without refreshing."
+                    )
+                    return codes, False
+
             token_expires_at = codes.get("last_run", 0) + codes.get("expires_in", 0)
-            if time.time() < token_expires_at - expiry_buffer:
+            clock_fresh = time.time() < token_expires_at - expiry_buffer
+            # The clock short-circuit is correct ONLY when not forcing: it prevents a double
+            # refresh when a peer just refreshed. On a 401 (force=True) we MUST refresh regardless
+            # of the clock — trusting the clock here is exactly the bug that let dead-but-"valid"
+            # tokens be reused, so the retry 401'd again.
+            if clock_fresh and not force:
                 logger.debug(
                     f"atomic_refresh: token in {self!r} already fresh "
                     f"({token_expires_at - time.time():.0f}s remaining) — "
                     "another process already refreshed."
                 )
                 return codes, False
+
+            if force:
+                logger.info(
+                    f"atomic_refresh: FORCING refresh in {self!r} after a 401 — server rejected "
+                    "the token regardless of the local clock."
+                )
             new_token_data = do_refresh_fn(codes)
             self.save_token(new_token_data)
             return new_token_data, True
@@ -1219,13 +1247,18 @@ class Connection(object):
                     headers=headers,
                     params=params,
                 )
-                # if there is a 401 Unauthorized error, we need to refresh the token and try again.
-                # Reset expires so that OAuth connections always re-read the token store — another
-                # process (e.g. bottlemover) may have already refreshed the token in MySQL.
+                # A 401 means the SERVER rejected this access token — ground truth that overrides
+                # our local expiry clock. The old code only reset self.expires and called
+                # _manage_token_refresh(), but atomic_refresh() gates on the *stored* token's clock
+                # and would short-circuit (no real refresh) when a token was revoked BEFORE its
+                # nominal expiry (refresh-token rotation). The reused dead token then 401'd again.
+                # Now we FORCE a real refresh and pass the token that failed, so the store can adopt
+                # a peer's newer token if present, else mint a fresh one regardless of the clock.
                 if result.status_code == 401:
+                    failed_token = getattr(self, "access_token", None)
                     if hasattr(self, "expires"):
                         self.expires = 0.0
-                    self._manage_token_refresh()
+                    self._manage_token_refresh(force=True, stale_access_token=failed_token)
                     result = self._session.request(
                         method,
                         url,
@@ -1234,6 +1267,18 @@ class Connection(object):
                         headers=headers,
                         params=params,
                     )
+                    if result.status_code == 401:
+                        # The forced refresh did NOT clear the 401. This should not happen once the
+                        # force path works; if it does, the self-heal has regressed — be LOUD so it
+                        # can't be missed (this also raises below via the status_code check).
+                        broke_msg = (
+                            "pyLightspeed SELF-HEAL FAILED — forced token refresh did not clear a "
+                            f"401 @ {url}. Either the refresh token is genuinely revoked (re-run the "
+                            "OAuth flow), or atomic_refresh(force=...) regressed. "
+                            ">>> I AM STILL BROKE! HERE I AM! FIX ME! <<<"
+                        )
+                        logger.error(broke_msg)
+                        print(f"\n*** {broke_msg} ***\n", flush=True)
                 elif result.status_code == 429:
                     # Use the Retry-After header Lightspeed sends; fall back to
                     # 5s for burst limiter (needs ≥1s) or 30s for leaky bucket.
@@ -1361,8 +1406,15 @@ class Connection(object):
                 break
         return result
 
-    def _manage_token_refresh(self):
-        """Monitors token refresh requirements where needed and refreshes the token if needed. This should be overridden by subclasses to handle the specific API type."""
+    def _manage_token_refresh(self, force: bool = False, stale_access_token: str | None = None):
+        """Monitors token refresh requirements where needed and refreshes the token if needed. This should be overridden by subclasses to handle the specific API type.
+
+        force: when True (set by the 401 handler in :meth:`request`/run-method), bypass any
+            "still valid by clock" short-circuit and obtain a genuinely fresh token. Auth
+            subclasses MUST honour this or 401s caused by early-revoked tokens won't self-heal.
+        stale_access_token: the access token that just 401'd, so the refresh can detect whether a
+            peer already replaced it (and adopt that) instead of rotating the refresh token again.
+        """
         return
 
     def _handle_result(self, res):
@@ -1547,8 +1599,8 @@ class RSeriesConnection(OAuthConnection):
             token_store=token_store,
         )
 
-    def _manage_token_refresh(self):
-        """Refresh the R-Series access token when expired.
+    def _manage_token_refresh(self, force: bool = False, stale_access_token: str | None = None):
+        """Refresh the R-Series access token when expired (or when *force* is set after a 401).
 
         Delegates to :meth:`~TokenStore.atomic_refresh` on the token store,
         which acquires an exclusive lock (file-based for all stores;
@@ -1556,16 +1608,24 @@ class RSeriesConnection(OAuthConnection):
         the OAuth API.  This guarantees that on a single machine only one
         process ever calls Lightspeed with a given ``refresh_token``,
         preventing the revocation race described in the Lightspeed docs.
+
+        ``force`` (passed by the 401 handler in :class:`Connection`) bypasses the local-clock
+        short-circuit so a server-rejected-but-clock-"valid" token is actually replaced. Without
+        it, a token revoked before its nominal expiry (refresh-token rotation) would be reused and
+        the retry would 401 again. ``stale_access_token`` lets the store adopt a peer's newer token
+        instead of refreshing again.
         """
-        if time.time() < self.expires:
+        if not force and time.time() < self.expires:
             logger.debug(
                 f"{self}: Token still valid for {self.expires - time.time():.0f}s"
             )
             return
 
-        logger.info(f"{self}: TOKEN REFRESH: acquiring lock…")
+        logger.info(f"{self}: TOKEN REFRESH: acquiring lock… (force={force})")
         token_data, was_refreshed = self._token_store.atomic_refresh(
-            self._fetch_refreshed_token
+            self._fetch_refreshed_token,
+            force=force,
+            stale_access_token=stale_access_token,
         )
         if was_refreshed:
             logger.info(
@@ -2149,10 +2209,13 @@ class XSeriesOauthConnection(XSeriesPersonalConnection):
             )
         return f"https://{self.domain_prefix}.{self._API_SERVICE}/api/1.0/token"
 
-    def _manage_token_refresh(self) -> None:
-        """Load token from store, refresh if expired, update session headers.
+    def _manage_token_refresh(self, force: bool = False, stale_access_token: str | None = None) -> None:
+        """Load token from store, refresh if expired (or when *force* is set after a 401), update session headers.
 
         X-Series uses an absolute ``expires`` Unix timestamp (not ``expires_in``).
+        ``force`` (set by the 401 handler) bypasses the local-clock check so a server-rejected
+        token is actually re-minted. ``stale_access_token`` is accepted for signature parity with
+        the base / R-Series refresh (X-Series refreshes inline, so it is not otherwise used here).
         Raises :class:`MissingTokenError` when no valid token is available.
         """
         codes = self._token_store.load_token()
@@ -2178,7 +2241,7 @@ class XSeriesOauthConnection(XSeriesPersonalConnection):
         # X-Series returns the absolute expiry as `expires` (Unix timestamp).
         # Refresh if within 60 seconds of expiry.
         token_expires = float(codes.get("expires", 0))
-        if time.time() < token_expires - 60:
+        if not force and time.time() < token_expires - 60:
             self.access_token = codes["access_token"]
             self.expires = token_expires
             self._session.headers["User-Agent"] = f"pyLightspeed/{self.host}"
