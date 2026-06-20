@@ -1,0 +1,1535 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Python client for the Lightspeed POS and eCom APIs (R-Series, C-Series, X-Series, E-Series)">
+      
+      
+        <meta name="author" content="Wine Foundry">
+      
+      
+      
+        <link rel="prev" href="../usage/">
+      
+      
+        <link rel="next" href="../adding-resources/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.3">
+    
+    
+      
+        <title>Connections - pyLightspeed</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/_mkdocstrings.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="deep-purple" data-md-color-accent="purple">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#connections" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="pyLightspeed" class="md-header__button md-logo" aria-label="pyLightspeed" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            pyLightspeed
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Connections
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="deep-purple" data-md-color-accent="purple"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="deep-purple" data-md-color-accent="purple"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/EvilConsultant/pyLightspeed" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    EvilConsultant/pyLightspeed
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../usage/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Usage
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    <li class="md-tabs__item md-tabs__item--active">
+      <a href="./" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Connections
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../adding-resources/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Adding Resources
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../testing/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Testing
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../api/" class="md-tabs__link">
+          
+  
+  
+  API Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="pyLightspeed" class="md-nav__button md-logo" aria-label="pyLightspeed" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    pyLightspeed
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/EvilConsultant/pyLightspeed" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    EvilConsultant/pyLightspeed
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../usage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Usage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connections
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connections
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#authentication-styles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Authentication Styles
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#r-series-lightspeed-retail" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        R-Series (Lightspeed Retail)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="R-Series (Lightspeed Retail)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#using-an-existing-token-file" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Using an Existing Token File
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#using-a-custom-tokenstore" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Using a Custom TokenStore
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#first-time-oauth-setup-new-connection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        First-Time OAuth Setup (New Connection)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#token-file-format" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Token File Format
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#x-series-lightspeed-retail-x" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        X-Series (Lightspeed Retail X)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="X-Series (Lightspeed Retail X)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#personal-access-token" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Personal Access Token
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#oauth-multi-store-distributed-app" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        OAuth (Multi-Store / Distributed App)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#x-series-token-format" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        X-Series Token Format
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#c-series-lightspeed-ecom" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        C-Series (Lightspeed eCom)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#e-series-ecwid" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        E-Series (Ecwid)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#token-storage-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Token Storage Reference
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#errors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Errors
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#connection-api-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Connection API Reference
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adding-resources/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Adding Resources
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../testing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    API Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    api
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/connection/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    connection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/exceptions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    exceptions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/store/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    store
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/resources/base/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    resources/base
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#authentication-styles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Authentication Styles
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#r-series-lightspeed-retail" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        R-Series (Lightspeed Retail)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="R-Series (Lightspeed Retail)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#using-an-existing-token-file" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Using an Existing Token File
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#using-a-custom-tokenstore" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Using a Custom TokenStore
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#first-time-oauth-setup-new-connection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        First-Time OAuth Setup (New Connection)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#token-file-format" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Token File Format
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#x-series-lightspeed-retail-x" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        X-Series (Lightspeed Retail X)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="X-Series (Lightspeed Retail X)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#personal-access-token" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Personal Access Token
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#oauth-multi-store-distributed-app" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        OAuth (Multi-Store / Distributed App)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#x-series-token-format" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        X-Series Token Format
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#c-series-lightspeed-ecom" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        C-Series (Lightspeed eCom)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#e-series-ecwid" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        E-Series (Ecwid)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#token-storage-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Token Storage Reference
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#errors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Errors
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#connection-api-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Connection API Reference
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="connections">Connections<a class="headerlink" href="#connections" title="Permanent link">&para;</a></h1>
+<p>pyLightspeed communicates with each Lightspeed series through a <em>connection</em> object. Every high-level <code>LightspeedXxxApi</code> class creates one automatically, so you normally never instantiate a connection directly — but understanding how they work is important when you need to do the initial OAuth setup or customise token storage.</p>
+<h2 id="authentication-styles">Authentication Styles<a class="headerlink" href="#authentication-styles" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Series</th>
+<th>Authentication</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>R-Series</strong> (Retail)</td>
+<td>OAuth 2.0 — Authorization Code Grant</td>
+<td>Tokens stored via a <code>TokenStore</code>; automatically refreshed on expiry.</td>
+</tr>
+<tr>
+<td><strong>X-Series</strong> (Retail X)</td>
+<td>OAuth 2.0 <em>or</em> Personal Access Token</td>
+<td>OAuth tokens include an absolute <code>expires</code> timestamp and a per-retailer <code>domain_prefix</code>. Personal tokens are for Plus-plan retailers only.</td>
+</tr>
+<tr>
+<td><strong>C-Series</strong> (eCom)</td>
+<td>HTTP Basic Auth (API key + secret)</td>
+<td>No token management required.</td>
+</tr>
+<tr>
+<td><strong>E-Series</strong> (Ecwid)</td>
+<td>API secret passed as a query parameter</td>
+<td>No token management required.</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="r-series-lightspeed-retail">R-Series (Lightspeed Retail)<a class="headerlink" href="#r-series-lightspeed-retail" title="Permanent link">&para;</a></h2>
+<p>R-Series uses OAuth 2.0. If you already have a token file from a previous authorisation you only need to point the API class at it. If you are setting up a <strong>new</strong> connection you will need to run the one-time authorization flow first.</p>
+<h3 id="using-an-existing-token-file">Using an Existing Token File<a class="headerlink" href="#using-an-existing-token-file" title="Permanent link">&para;</a></h3>
+<p>When a valid <code>codes.json</code> already exists, create the API instance and everything else is handled automatically — the library reads the refresh token, exchanges it for a fresh access token, and saves the updated token file.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pylightspeed.api</span><span class="w"> </span><span class="kn">import</span> <span class="n">LightspeedRSeriesApi</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="n">lsr</span> <span class="o">=</span> <span class="n">LightspeedRSeriesApi</span><span class="p">(</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="n">account_id</span><span class="o">=</span><span class="s2">&quot;123456&quot;</span><span class="p">,</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="n">client_id</span><span class="o">=</span><span class="s2">&quot;your_client_id&quot;</span><span class="p">,</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="n">client_secret</span><span class="o">=</span><span class="s2">&quot;your_client_secret&quot;</span><span class="p">,</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    <span class="n">token_file</span><span class="o">=</span><span class="s2">&quot;/path/to/codes.json&quot;</span><span class="p">,</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="p">)</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="c1"># Start making API calls immediately</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="n">employees</span> <span class="o">=</span> <span class="n">lsr</span><span class="o">.</span><span class="n">Employee</span><span class="o">.</span><span class="n">listall</span><span class="p">()</span>
+</code></pre></div>
+<h3 id="using-a-custom-tokenstore">Using a Custom TokenStore<a class="headerlink" href="#using-a-custom-tokenstore" title="Permanent link">&para;</a></h3>
+<p>If you want to store tokens somewhere other than a local file (e.g. a database or secrets manager), pass a <code>TokenStore</code> instance. Implement <code>load</code> (returns a <code>dict</code> or <code>None</code>) and <code>save</code> (receives the full token <code>dict</code>).</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pylightspeed.connection</span><span class="w"> </span><span class="kn">import</span> <span class="n">TokenStore</span><span class="p">,</span> <span class="n">FileTokenStore</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pylightspeed.api</span><span class="w"> </span><span class="kn">import</span> <span class="n">LightspeedRSeriesApi</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="c1"># Built-in file-based store (atomic writes, same as token_file= shorthand)</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="n">store</span> <span class="o">=</span> <span class="n">FileTokenStore</span><span class="p">(</span><span class="s2">&quot;/path/to/codes.json&quot;</span><span class="p">)</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="c1"># Custom store example</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="k">class</span><span class="w"> </span><span class="nc">EnvTokenStore</span><span class="p">(</span><span class="n">TokenStore</span><span class="p">):</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Reads/writes tokens from environment variables (demo only).&quot;&quot;&quot;</span>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>    <span class="kn">import</span><span class="w"> </span><span class="nn">os</span><span class="o">,</span><span class="w"> </span><span class="nn">json</span>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">load</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>        <span class="n">raw</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s2">&quot;LS_TOKEN&quot;</span><span class="p">)</span>
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>        <span class="k">return</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">raw</span><span class="p">)</span> <span class="k">if</span> <span class="n">raw</span> <span class="k">else</span> <span class="kc">None</span>
+<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>
+<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">save</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">token_data</span><span class="p">):</span>
+<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a>        <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s2">&quot;LS_TOKEN&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">token_data</span><span class="p">)</span>
+<a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a>
+<a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a><span class="n">lsr</span> <span class="o">=</span> <span class="n">LightspeedRSeriesApi</span><span class="p">(</span>
+<a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a>    <span class="n">account_id</span><span class="o">=</span><span class="s2">&quot;123456&quot;</span><span class="p">,</span>
+<a id="__codelineno-1-21" name="__codelineno-1-21" href="#__codelineno-1-21"></a>    <span class="n">client_id</span><span class="o">=</span><span class="s2">&quot;your_client_id&quot;</span><span class="p">,</span>
+<a id="__codelineno-1-22" name="__codelineno-1-22" href="#__codelineno-1-22"></a>    <span class="n">client_secret</span><span class="o">=</span><span class="s2">&quot;your_client_secret&quot;</span><span class="p">,</span>
+<a id="__codelineno-1-23" name="__codelineno-1-23" href="#__codelineno-1-23"></a>    <span class="n">token_store</span><span class="o">=</span><span class="n">store</span><span class="p">,</span>   <span class="c1"># or token_store=EnvTokenStore()</span>
+<a id="__codelineno-1-24" name="__codelineno-1-24" href="#__codelineno-1-24"></a><span class="p">)</span>
+</code></pre></div>
+<h3 id="first-time-oauth-setup-new-connection">First-Time OAuth Setup (New Connection)<a class="headerlink" href="#first-time-oauth-setup-new-connection" title="Permanent link">&para;</a></h3>
+<p>The first time you connect — or when the token file is missing — you need to run through the authorization flow once. This requires <strong>browser and user interaction</strong> (the store owner must approve your app), so it cannot happen automatically inside a server or container.</p>
+<p>Run a one-off setup script from a machine with browser access:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">webbrowser</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">urllib.parse</span><span class="w"> </span><span class="kn">import</span> <span class="n">urlparse</span><span class="p">,</span> <span class="n">parse_qs</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="kn">import</span><span class="w"> </span><span class="nn">requests</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pylightspeed.connection</span><span class="w"> </span><span class="kn">import</span> <span class="n">RSeriesConnection</span><span class="p">,</span> <span class="n">FileTokenStore</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="n">CLIENT_ID</span>     <span class="o">=</span> <span class="s2">&quot;your_client_id&quot;</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="n">CLIENT_SECRET</span> <span class="o">=</span> <span class="s2">&quot;your_client_secret&quot;</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="n">REDIRECT_URI</span>  <span class="o">=</span> <span class="s2">&quot;https://127.0.0.1:5000/&quot;</span>   <span class="c1"># must match your OAuth app settings</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="n">SCOPE</span>         <span class="o">=</span> <span class="s2">&quot;employee:all&quot;</span>
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="n">TOKEN_FILE</span>    <span class="o">=</span> <span class="s2">&quot;/path/to/codes.json&quot;</span>
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="c1"># Step 1 — Build the authorization URL (PKCE enabled by default)</span>
+<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="n">url</span><span class="p">,</span> <span class="n">state</span><span class="p">,</span> <span class="n">code_verifier</span> <span class="o">=</span> <span class="n">RSeriesConnection</span><span class="o">.</span><span class="n">get_authorization_url</span><span class="p">(</span>
+<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a>    <span class="n">CLIENT_ID</span><span class="p">,</span> <span class="n">SCOPE</span><span class="p">,</span> <span class="n">REDIRECT_URI</span>
+<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="p">)</span>
+<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a>
+<a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a><span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Opening authorization page in your browser…&quot;</span><span class="p">)</span>
+<a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a><span class="n">webbrowser</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">url</span><span class="p">)</span>
+<a id="__codelineno-2-20" name="__codelineno-2-20" href="#__codelineno-2-20"></a>
+<a id="__codelineno-2-21" name="__codelineno-2-21" href="#__codelineno-2-21"></a><span class="c1"># Step 2 — After the store owner approves, Lightspeed redirects to REDIRECT_URI</span>
+<a id="__codelineno-2-22" name="__codelineno-2-22" href="#__codelineno-2-22"></a><span class="c1">#           with ?code=...&amp;state=... in the URL.</span>
+<a id="__codelineno-2-23" name="__codelineno-2-23" href="#__codelineno-2-23"></a><span class="n">redirected_url</span> <span class="o">=</span> <span class="nb">input</span><span class="p">(</span><span class="s2">&quot;Paste the full redirect URL here: &quot;</span><span class="p">)</span>
+<a id="__codelineno-2-24" name="__codelineno-2-24" href="#__codelineno-2-24"></a><span class="n">code</span> <span class="o">=</span> <span class="n">parse_qs</span><span class="p">(</span><span class="n">urlparse</span><span class="p">(</span><span class="n">redirected_url</span><span class="p">)</span><span class="o">.</span><span class="n">query</span><span class="p">)[</span><span class="s2">&quot;code&quot;</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span>
+<a id="__codelineno-2-25" name="__codelineno-2-25" href="#__codelineno-2-25"></a>
+<a id="__codelineno-2-26" name="__codelineno-2-26" href="#__codelineno-2-26"></a><span class="c1"># (Optional but recommended) Validate the returned state</span>
+<a id="__codelineno-2-27" name="__codelineno-2-27" href="#__codelineno-2-27"></a><span class="n">returned_state</span> <span class="o">=</span> <span class="n">parse_qs</span><span class="p">(</span><span class="n">urlparse</span><span class="p">(</span><span class="n">redirected_url</span><span class="p">)</span><span class="o">.</span><span class="n">query</span><span class="p">)</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;state&quot;</span><span class="p">,</span> <span class="p">[</span><span class="kc">None</span><span class="p">])[</span><span class="mi">0</span><span class="p">]</span>
+<a id="__codelineno-2-28" name="__codelineno-2-28" href="#__codelineno-2-28"></a><span class="k">assert</span> <span class="n">returned_state</span> <span class="o">==</span> <span class="n">state</span><span class="p">,</span> <span class="s2">&quot;State mismatch — possible CSRF attack&quot;</span>
+<a id="__codelineno-2-29" name="__codelineno-2-29" href="#__codelineno-2-29"></a>
+<a id="__codelineno-2-30" name="__codelineno-2-30" href="#__codelineno-2-30"></a><span class="c1"># Step 3 — Exchange the code for tokens</span>
+<a id="__codelineno-2-31" name="__codelineno-2-31" href="#__codelineno-2-31"></a><span class="n">token_data</span> <span class="o">=</span> <span class="n">RSeriesConnection</span><span class="o">.</span><span class="n">exchange_code_for_token</span><span class="p">(</span>
+<a id="__codelineno-2-32" name="__codelineno-2-32" href="#__codelineno-2-32"></a>    <span class="n">CLIENT_ID</span><span class="p">,</span> <span class="n">CLIENT_SECRET</span><span class="p">,</span> <span class="n">code</span><span class="p">,</span> <span class="n">REDIRECT_URI</span><span class="p">,</span>
+<a id="__codelineno-2-33" name="__codelineno-2-33" href="#__codelineno-2-33"></a>    <span class="n">code_verifier</span><span class="o">=</span><span class="n">code_verifier</span><span class="p">,</span>   <span class="c1"># required if PKCE was used</span>
+<a id="__codelineno-2-34" name="__codelineno-2-34" href="#__codelineno-2-34"></a><span class="p">)</span>
+<a id="__codelineno-2-35" name="__codelineno-2-35" href="#__codelineno-2-35"></a>
+<a id="__codelineno-2-36" name="__codelineno-2-36" href="#__codelineno-2-36"></a><span class="c1"># Step 4 — Persist the tokens</span>
+<a id="__codelineno-2-37" name="__codelineno-2-37" href="#__codelineno-2-37"></a><span class="n">FileTokenStore</span><span class="p">(</span><span class="n">TOKEN_FILE</span><span class="p">)</span><span class="o">.</span><span class="n">save</span><span class="p">(</span><span class="n">token_data</span><span class="p">)</span>
+<a id="__codelineno-2-38" name="__codelineno-2-38" href="#__codelineno-2-38"></a><span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Token saved to&quot;</span><span class="p">,</span> <span class="n">TOKEN_FILE</span><span class="p">)</span>
+</code></pre></div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p><code>get_authorization_url()</code> generates PKCE parameters (S256 code challenge) by default.
+This is recommended by Lightspeed and required for publicly distributed clients.
+Pass <code>use_pkce=False</code> only when your OAuth app is registered as a non-PKCE client.</p>
+</div>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>The <code>code</code> received at your redirect URI is <strong>valid for 60 seconds only</strong>.
+Run the exchange step immediately after pasting the URL.</p>
+</div>
+<h3 id="token-file-format">Token File Format<a class="headerlink" href="#token-file-format" title="Permanent link">&para;</a></h3>
+<p>The token file is plain JSON:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="p">{</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">    </span><span class="nt">&quot;access_token&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;eyJ...&quot;</span><span class="p">,</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">    </span><span class="nt">&quot;expires_in&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">3600</span><span class="p">,</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">    </span><span class="nt">&quot;token_type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;bearer&quot;</span><span class="p">,</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">    </span><span class="nt">&quot;scope&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;employee:all&quot;</span><span class="p">,</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="w">    </span><span class="nt">&quot;refresh_token&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;def502...&quot;</span><span class="p">,</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="w">    </span><span class="nt">&quot;last_run&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">1740675432.1</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="p">}</span>
+</code></pre></div>
+<p><code>refresh_token</code> does <strong>not</strong> expire. The library always preserves it when saving updated tokens because Lightspeed does not return it in refresh responses.</p>
+<hr />
+<h2 id="x-series-lightspeed-retail-x">X-Series (Lightspeed Retail X)<a class="headerlink" href="#x-series-lightspeed-retail-x" title="Permanent link">&para;</a></h2>
+<p>X-Series supports two authentication methods.</p>
+<h3 id="personal-access-token">Personal Access Token<a class="headerlink" href="#personal-access-token" title="Permanent link">&para;</a></h3>
+<p>Suitable for single-store scripts run by a Plus-plan retailer.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pylightspeed.api</span><span class="w"> </span><span class="kn">import</span> <span class="n">LightspeedXSeriesApi</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="n">lsx</span> <span class="o">=</span> <span class="n">LightspeedXSeriesApi</span><span class="p">(</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>    <span class="n">domain_prefix</span><span class="o">=</span><span class="s2">&quot;mystore&quot;</span><span class="p">,</span>     <span class="c1"># &quot;mystore&quot; for mystore.retail.lightspeed.app</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>    <span class="n">personal_token</span><span class="o">=</span><span class="s2">&quot;fMYg...&quot;</span><span class="p">,</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="p">)</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="n">products</span> <span class="o">=</span> <span class="n">lsx</span><span class="o">.</span><span class="n">Products</span><span class="o">.</span><span class="n">listall</span><span class="p">()</span>
+</code></pre></div>
+<h3 id="oauth-multi-store-distributed-app">OAuth (Multi-Store / Distributed App)<a class="headerlink" href="#oauth-multi-store-distributed-app" title="Permanent link">&para;</a></h3>
+<p>For applications that connect to multiple stores, use OAuth. Each retailer goes through the authorization flow once; their token (which includes their <code>domain_prefix</code>) is stored in a <code>TokenStore</code>.</p>
+<p><strong>First-time setup for a new retailer:</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">secrets</span><span class="o">,</span><span class="w"> </span><span class="nn">webbrowser</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">urllib.parse</span><span class="w"> </span><span class="kn">import</span> <span class="n">urlparse</span><span class="p">,</span> <span class="n">parse_qs</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pylightspeed.connection</span><span class="w"> </span><span class="kn">import</span> <span class="n">XSeriesOauthConnection</span><span class="p">,</span> <span class="n">FileTokenStore</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="n">CLIENT_ID</span>     <span class="o">=</span> <span class="s2">&quot;your_client_id&quot;</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="n">CLIENT_SECRET</span> <span class="o">=</span> <span class="s2">&quot;your_client_secret&quot;</span>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="n">REDIRECT_URI</span>  <span class="o">=</span> <span class="s2">&quot;https://yourapp.example.com/oauth/callback&quot;</span>
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="n">SCOPE</span>         <span class="o">=</span> <span class="s2">&quot;products:read sales:read customers:read&quot;</span>
+<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="n">TOKEN_FILE</span>    <span class="o">=</span> <span class="s2">&quot;/path/to/xseries_tokens.json&quot;</span>
+<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a>
+<a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a><span class="c1"># Step 1 — Build the authorization URL</span>
+<a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a><span class="n">state</span> <span class="o">=</span> <span class="n">secrets</span><span class="o">.</span><span class="n">token_urlsafe</span><span class="p">(</span><span class="mi">12</span><span class="p">)</span>   <span class="c1"># at least 8 characters, required</span>
+<a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a><span class="n">url</span> <span class="o">=</span> <span class="n">XSeriesOauthConnection</span><span class="o">.</span><span class="n">get_authorization_url</span><span class="p">(</span>
+<a id="__codelineno-5-15" name="__codelineno-5-15" href="#__codelineno-5-15"></a>    <span class="n">CLIENT_ID</span><span class="p">,</span> <span class="n">SCOPE</span><span class="p">,</span> <span class="n">REDIRECT_URI</span><span class="p">,</span> <span class="n">state</span>
+<a id="__codelineno-5-16" name="__codelineno-5-16" href="#__codelineno-5-16"></a><span class="p">)</span>
+<a id="__codelineno-5-17" name="__codelineno-5-17" href="#__codelineno-5-17"></a>
+<a id="__codelineno-5-18" name="__codelineno-5-18" href="#__codelineno-5-18"></a><span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Send this URL to the retailer:&quot;</span><span class="p">,</span> <span class="n">url</span><span class="p">)</span>
+<a id="__codelineno-5-19" name="__codelineno-5-19" href="#__codelineno-5-19"></a><span class="n">webbrowser</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">url</span><span class="p">)</span>
+<a id="__codelineno-5-20" name="__codelineno-5-20" href="#__codelineno-5-20"></a>
+<a id="__codelineno-5-21" name="__codelineno-5-21" href="#__codelineno-5-21"></a><span class="c1"># Step 2 — Retailer approves; redirect URI receives ?code=...&amp;domain_prefix=...&amp;state=...</span>
+<a id="__codelineno-5-22" name="__codelineno-5-22" href="#__codelineno-5-22"></a><span class="n">redirected_url</span> <span class="o">=</span> <span class="nb">input</span><span class="p">(</span><span class="s2">&quot;Paste the full redirect URL: &quot;</span><span class="p">)</span>
+<a id="__codelineno-5-23" name="__codelineno-5-23" href="#__codelineno-5-23"></a><span class="n">params</span> <span class="o">=</span> <span class="n">parse_qs</span><span class="p">(</span><span class="n">urlparse</span><span class="p">(</span><span class="n">redirected_url</span><span class="p">)</span><span class="o">.</span><span class="n">query</span><span class="p">)</span>
+<a id="__codelineno-5-24" name="__codelineno-5-24" href="#__codelineno-5-24"></a><span class="n">code</span>          <span class="o">=</span> <span class="n">params</span><span class="p">[</span><span class="s2">&quot;code&quot;</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span>
+<a id="__codelineno-5-25" name="__codelineno-5-25" href="#__codelineno-5-25"></a><span class="n">domain_prefix</span> <span class="o">=</span> <span class="n">params</span><span class="p">[</span><span class="s2">&quot;domain_prefix&quot;</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span>
+<a id="__codelineno-5-26" name="__codelineno-5-26" href="#__codelineno-5-26"></a><span class="n">returned_state</span> <span class="o">=</span> <span class="n">params</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;state&quot;</span><span class="p">,</span> <span class="p">[</span><span class="kc">None</span><span class="p">])[</span><span class="mi">0</span><span class="p">]</span>
+<a id="__codelineno-5-27" name="__codelineno-5-27" href="#__codelineno-5-27"></a>
+<a id="__codelineno-5-28" name="__codelineno-5-28" href="#__codelineno-5-28"></a><span class="k">assert</span> <span class="n">returned_state</span> <span class="o">==</span> <span class="n">state</span><span class="p">,</span> <span class="s2">&quot;State mismatch&quot;</span>
+<a id="__codelineno-5-29" name="__codelineno-5-29" href="#__codelineno-5-29"></a>
+<a id="__codelineno-5-30" name="__codelineno-5-30" href="#__codelineno-5-30"></a><span class="c1"># Step 3 — Exchange code for tokens</span>
+<a id="__codelineno-5-31" name="__codelineno-5-31" href="#__codelineno-5-31"></a><span class="n">token_data</span> <span class="o">=</span> <span class="n">XSeriesOauthConnection</span><span class="o">.</span><span class="n">exchange_code_for_token</span><span class="p">(</span>
+<a id="__codelineno-5-32" name="__codelineno-5-32" href="#__codelineno-5-32"></a>    <span class="n">CLIENT_ID</span><span class="p">,</span> <span class="n">CLIENT_SECRET</span><span class="p">,</span> <span class="n">code</span><span class="p">,</span> <span class="n">REDIRECT_URI</span><span class="p">,</span> <span class="n">domain_prefix</span>
+<a id="__codelineno-5-33" name="__codelineno-5-33" href="#__codelineno-5-33"></a><span class="p">)</span>
+<a id="__codelineno-5-34" name="__codelineno-5-34" href="#__codelineno-5-34"></a>
+<a id="__codelineno-5-35" name="__codelineno-5-35" href="#__codelineno-5-35"></a><span class="n">FileTokenStore</span><span class="p">(</span><span class="n">TOKEN_FILE</span><span class="p">)</span><span class="o">.</span><span class="n">save</span><span class="p">(</span><span class="n">token_data</span><span class="p">)</span>
+</code></pre></div>
+<p><strong>Using the connection after setup:</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pylightspeed.api</span><span class="w"> </span><span class="kn">import</span> <span class="n">LightspeedXSeriesApi</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="n">lsx</span> <span class="o">=</span> <span class="n">LightspeedXSeriesApi</span><span class="p">(</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>    <span class="n">client_id</span><span class="o">=</span><span class="s2">&quot;your_client_id&quot;</span><span class="p">,</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>    <span class="n">client_secret</span><span class="o">=</span><span class="s2">&quot;your_client_secret&quot;</span><span class="p">,</span>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>    <span class="n">token_file</span><span class="o">=</span><span class="s2">&quot;/path/to/xseries_tokens.json&quot;</span><span class="p">,</span>
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="p">)</span>
+<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a>
+<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a><span class="n">sales</span> <span class="o">=</span> <span class="n">lsx</span><span class="o">.</span><span class="n">Sales</span><span class="o">.</span><span class="n">listall</span><span class="p">()</span>
+</code></pre></div>
+<h3 id="x-series-token-format">X-Series Token Format<a class="headerlink" href="#x-series-token-format" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="p">{</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">    </span><span class="nt">&quot;access_token&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;fMYg...&quot;</span><span class="p">,</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="w">    </span><span class="nt">&quot;token_type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Bearer&quot;</span><span class="p">,</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="w">    </span><span class="nt">&quot;expires&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1740679032</span><span class="p">,</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="w">    </span><span class="nt">&quot;expires_in&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">86400</span><span class="p">,</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="w">    </span><span class="nt">&quot;refresh_token&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;J3F6...&quot;</span><span class="p">,</span>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="w">    </span><span class="nt">&quot;domain_prefix&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;mystore&quot;</span><span class="p">,</span>
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="w">    </span><span class="nt">&quot;scope&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;products:read sales:read customers:read&quot;</span>
+<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a><span class="p">}</span>
+</code></pre></div>
+<p><code>expires</code> is an <strong>absolute Unix timestamp</strong>. The library refreshes the access token when fewer than 60 seconds remain. A new <code>refresh_token</code> is returned on every refresh — the library saves the latest value automatically.</p>
+<hr />
+<h2 id="c-series-lightspeed-ecom">C-Series (Lightspeed eCom)<a class="headerlink" href="#c-series-lightspeed-ecom" title="Permanent link">&para;</a></h2>
+<p>C-Series uses HTTP Basic Auth. No OAuth or token file required.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pylightspeed.api</span><span class="w"> </span><span class="kn">import</span> <span class="n">LightspeedCSeriesApi</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="n">lsc</span> <span class="o">=</span> <span class="n">LightspeedCSeriesApi</span><span class="p">(</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>    <span class="n">api_key</span><span class="o">=</span><span class="s2">&quot;your_api_key&quot;</span><span class="p">,</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>    <span class="n">api_secret</span><span class="o">=</span><span class="s2">&quot;your_api_secret&quot;</span><span class="p">,</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>    <span class="c1"># host defaults to &quot;api.shoplightspeed.com&quot;</span>
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>    <span class="c1"># api_path defaults to &quot;/us/{}&quot;  (change locale if needed)</span>
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="p">)</span>
+<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a>
+<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a><span class="n">products</span> <span class="o">=</span> <span class="n">lsc</span><span class="o">.</span><span class="n">Products</span><span class="o">.</span><span class="n">listall</span><span class="p">()</span>
+</code></pre></div>
+<p>Obtain your API key and secret from the eCom back-office under <strong>Apps → API credentials</strong>.</p>
+<hr />
+<h2 id="e-series-ecwid">E-Series (Ecwid)<a class="headerlink" href="#e-series-ecwid" title="Permanent link">&para;</a></h2>
+<p>E-Series passes the API secret as a query parameter on every request.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pylightspeed.api</span><span class="w"> </span><span class="kn">import</span> <span class="n">LightspeedESeriesApi</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="n">lse</span> <span class="o">=</span> <span class="n">LightspeedESeriesApi</span><span class="p">(</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>    <span class="n">store_id</span><span class="o">=</span><span class="s2">&quot;12345678&quot;</span><span class="p">,</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>    <span class="n">api_secret</span><span class="o">=</span><span class="s2">&quot;secret_your_ecwid_api_secret&quot;</span><span class="p">,</span>
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>    <span class="c1"># host defaults to &quot;app.ecwid.com&quot;</span>
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="p">)</span>
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>
+<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a><span class="n">orders</span> <span class="o">=</span> <span class="n">lse</span><span class="o">.</span><span class="n">Orders</span><span class="o">.</span><span class="n">listall</span><span class="p">()</span>
+</code></pre></div>
+<p>Use <code>api_public</code> instead of <code>api_secret</code> to use the store's public token (read-only access).</p>
+<hr />
+<h2 id="token-storage-reference">Token Storage Reference<a class="headerlink" href="#token-storage-reference" title="Permanent link">&para;</a></h2>
+<p>See the <a href="../reference/connection/">connection API reference</a> for full class documentation on <code>TokenStore</code> and <code>FileTokenStore</code>.</p>
+<hr />
+<h2 id="errors">Errors<a class="headerlink" href="#errors" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Exception</th>
+<th>When raised</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>MissingTokenError</code></td>
+<td>No valid token found in the token store (token file missing, empty, or contains an <code>"error"</code> key). Run the OAuth setup flow.</td>
+</tr>
+<tr>
+<td><code>Unauthorised</code></td>
+<td>The API returned <code>401 Unauthorized</code>. Usually means the access token is invalid — re-run the OAuth setup flow and replace the token file.</td>
+</tr>
+<tr>
+<td><code>RateLimitingException</code></td>
+<td>The API returned <code>429 Too Many Requests</code>. The connection handles rate limiting automatically for R-Series (leaky bucket) and X-Series (<code>Retry-After</code> header), so this exception should be rare.</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="connection-api-reference">Connection API Reference<a class="headerlink" href="#connection-api-reference" title="Permanent link">&para;</a></h2>
+<p>See the <a href="../reference/connection/">connection API reference</a> for full class and method documentation for all connection classes.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "navigation.top", "search.suggest", "search.highlight", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>
