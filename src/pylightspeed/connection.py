@@ -1944,12 +1944,13 @@ class RSeriesConnection(OAuthConnection):
 
             return result
 
-        except Exception as e:  # json might be invalid, or store might be down
-            # there is an issue that occurs then the number of items is divisible by 100 that throws an error. Rather than address it, just return the result and keep moving
-
-            e.__doc__ += (
-                " (_handle_result failed to decode JSON: " + str(res.content) + ")"
+        except Exception as e:  # json might be invalid, store might be down, or response is not standard R-Series format (e.g. DELETE confirmation, 404 body)
+            logger.warning(
+                f"RSeriesConnection._handle_result: unexpected response format "
+                f"(status={res.status_code}, content={res.content!r}): "
+                f"{type(e).__name__}: {e}"
             )
+            return {}
 
 
 class CSeriesConnection(Connection):
